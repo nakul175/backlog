@@ -6,6 +6,7 @@ import { isoDate } from '#shared/schemas';
 // Ceiling of every markdown text written on an issue: the description, a comment
 // and a custom field value. Each of them is scanned for mentions.
 export const ISSUE_TEXT_LIMIT = 50_000;
+export const ISSUE_DESCRIPTION_LIMIT = 250_000;
 
 // t.Numeric validates a numeric path param and coerces the string to a number. A
 // non-numeric id gets a 400 before it reaches the service.
@@ -460,14 +461,14 @@ export const createIssueBody = t.Object({
     t.Nullable(
       t.Integer({
         description:
-          'Numeric id of the issue this one is a subtask of, or null. The parent must be in this project and must not be a subtask itself.',
+          'Numeric id of the issue this one is a subtask of, or null. The parent must be in this project and the link must not create a cycle.',
       }),
     ),
   ),
   title: t.String({ minLength: 1, description: 'Issue title.' }),
   description: t.Optional(
     t.String({
-      maxLength: ISSUE_TEXT_LIMIT,
+      maxLength: ISSUE_DESCRIPTION_LIMIT,
       description: 'Issue description (plain text or markdown).',
     }),
   ),
@@ -573,7 +574,7 @@ export const updateIssueBody = t.Object({
     t.Nullable(
       t.Integer({
         description:
-          'Make this issue a subtask of that issue id, or null to detach it. The parent must be in this project and must not be a subtask itself; an issue that has subtasks cannot become one.',
+          'Make this issue a subtask of that issue id, or null to detach it. The parent must be in this project and the link must not create a cycle.',
       }),
     ),
   ),
@@ -601,7 +602,7 @@ export const updateIssueBody = t.Object({
   ),
   title: t.Optional(t.String({ minLength: 1, description: 'New title.' })),
   description: t.Optional(
-    t.String({ maxLength: ISSUE_TEXT_LIMIT, description: 'New description.' }),
+    t.String({ maxLength: ISSUE_DESCRIPTION_LIMIT, description: 'New description.' }),
   ),
   priority: t.Optional(
     t.Nullable(t.String({ description: 'One of: urgent, high, medium, low. Or null.' })),

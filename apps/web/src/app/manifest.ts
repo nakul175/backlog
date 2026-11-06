@@ -6,17 +6,13 @@ import type { MetadataRoute } from 'next';
 // which also covers the dark theme.
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: "It's a Plan",
-    short_name: "It's a Plan",
+    name: 'Backlog to the Future',
+    short_name: 'Backlog to the Future',
     start_url: '/',
     scope: '/',
     display: 'standalone',
     background_color: '#fafafa',
     theme_color: '#fafafa',
-    icons: [
-      { src: '/icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
-      { src: '/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
-      { src: '/icon-maskable-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
-    ],
+    icons: [{ src: '/brand/mascot.png', sizes: '1280x1280', type: 'image/png', purpose: 'any' }],
   };
 }

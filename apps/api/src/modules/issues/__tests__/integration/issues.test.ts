@@ -123,11 +123,11 @@ describe('issues', () => {
       expect(new Date(created.data!.dueDate!).getTime()).toBe(new Date('2026-02-01').getTime());
     });
 
-    it('accepts a description of 50000 characters and rejects a longer one', async () => {
+    it('accepts a description of 250000 characters and rejects a longer one', async () => {
       const { asOwner, columnId } = await setupProject();
-      const fits = await createIssue(asOwner, columnId, { description: 'x'.repeat(50_000) });
+      const fits = await createIssue(asOwner, columnId, { description: 'x'.repeat(250_000) });
       expect(fits.status).toBe(201);
-      const over = await createIssue(asOwner, columnId, { description: 'x'.repeat(50_001) });
+      const over = await createIssue(asOwner, columnId, { description: 'x'.repeat(250_001) });
       expect(over.status).toBe(400);
     });
 
@@ -360,8 +360,8 @@ describe('issues', () => {
       const { asOwner, columnId } = await setupProject();
       const issue = (await createIssue(asOwner, columnId)).data!;
       const edit = asOwner.issues({ issueId: issue.id });
-      expect((await edit.patch({ description: 'x'.repeat(50_000) })).status).toBe(200);
-      expect((await edit.patch({ description: 'x'.repeat(50_001) })).status).toBe(400);
+      expect((await edit.patch({ description: 'x'.repeat(250_000) })).status).toBe(200);
+      expect((await edit.patch({ description: 'x'.repeat(250_001) })).status).toBe(400);
     });
 
     it('moves the issue to another column', async () => {

@@ -13,3 +13,8 @@ Native logout changes default off, do not infer identities, change database sche
 reset credentials or alter native role/permission grants. Native-session checks use
 the original session birth time; independent machine credentials retain native policy.
 Rollback must preserve the Accounts revocation ledger and enforcing native guards.
+
+The serving checkout also contains existing subtask and Aplyd branding changes.
+Those source files are retained with live hash parity; they are part of the
+production baseline, not native-logout functionality. Database schema differences
+in this preserved baseline are comments only; no migration is introduced.

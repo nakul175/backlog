@@ -2,7 +2,7 @@ import { CornerDownRight } from 'lucide-react';
 import { type Maps } from '@/utils/project';
 import { cn } from '@/lib/utils';
 import { StateIcon } from '@/features/issue/components/shared/IssueIcons';
-import { useSubtasks } from '../../context/useSubtasks';
+import { useDescendants } from '../../context/useSubtasks';
 
 // The row's subtasks, as sub-rows under it behind a nesting mark: each subtask's
 // state, identifier and title. How many are done is on the row itself
@@ -17,7 +17,7 @@ export function TableRowSubtasks({
   maps: Maps;
   onOpenIssue: (id: number) => void;
 }) {
-  const subtasks = useSubtasks(issueId);
+  const subtasks = useDescendants(issueId);
   if (subtasks.length === 0) return null;
 
   return (
@@ -30,6 +30,7 @@ export function TableRowSubtasks({
             key={subtask.id}
             type="button"
             className="-mx-1.5 flex min-w-0 items-center gap-2 rounded px-1.5 py-1 text-left text-xs text-muted-foreground hover:bg-accent/50 hover:text-foreground"
+            style={{ paddingInlineStart: 6 + (subtask.nestingDepth - 1) * 16 }}
             onClick={(e) => {
               e.stopPropagation();
               e.preventDefault();

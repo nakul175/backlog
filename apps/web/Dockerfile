@@ -27,13 +27,15 @@ RUN bun install --frozen-lockfile
 # than hoisting them to the root, so copy the whole install tree (manifests +
 # every node_modules), then overlay the source. .dockerignore excludes
 # node_modules, so `COPY . .` does not clobber the copied dependencies.
-FROM base AS build
+FROM node:24-alpine AS build
+WORKDIR /app
+COPY --from=base /usr/local/bin/bun /usr/local/bin/bun
 COPY --from=install /app ./
 COPY . .
 # No per-instance value is baked in: the origins are read from the environment at
 # startup (apps/web/src/utils/runtimeEnv.ts), so one image serves any instance.
 ENV NEXT_TELEMETRY_DISABLED=1
-RUN cd apps/web && bun run build
+RUN --mount=type=cache,target=/app/apps/web/.next/cache cd apps/web && NODE_OPTIONS=--max-old-space-size=2048 bun run build --webpack
 
 # 3) Minimal final image (standalone output). Node, not Bun: turbopack imports a
 # serverExternalPackage under an internal alias that Next resolves through a Node
