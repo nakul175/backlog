@@ -18,6 +18,7 @@ permissions:
 
 jobs:
   quality:
+    timeout-minutes: 30
     name: Format, lint, typecheck
     runs-on: ubuntu-latest
     steps:
@@ -55,6 +56,7 @@ jobs:
         run: bun test scripts/
 
   build:
+    timeout-minutes: 30
     name: Build apps
     runs-on: ubuntu-latest
     steps:
@@ -77,6 +79,7 @@ jobs:
         run: bun run build
 
   test:
+    timeout-minutes: 30
     name: Test suite
     runs-on: ubuntu-latest
     steps:
@@ -99,3 +102,25 @@ jobs:
       - name: Tear down
         if: always()
         run: docker compose -f docker-compose.test.yml down -v
+
+  native-artifact:
+    name: Reviewed Linux API artifact
+    needs: [quality, build, test]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build production API candidate
+        run: docker build --label org.opencontainers.image.revision=${{ github.sha }} -f apps/api/Dockerfile -t aplyd-native-logout-btf:${{ github.sha }} .
+      - name: Archive candidate without credentials or databases
+        run: |
+          mkdir -p native-artifact
+          docker save aplyd-native-logout-btf:${{ github.sha }} | gzip > native-artifact/btf-native-api.tar.gz
+          cd native-artifact
+          sha256sum btf-native-api.tar.gz > SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: btf-native-logout-linux
+          path: native-artifact/
+          if-no-files-found: error
+          retention-days: 14
