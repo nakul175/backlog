@@ -7,7 +7,7 @@ import { noDragProps } from '@/lib/dnd';
 import { cn } from '@/lib/utils';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { StateIcon } from '@/features/issue/components/shared/IssueIcons';
-import { useSubtasks, useSubtasksCollapsed } from '../../context/useSubtasks';
+import { useDescendants, useSubtasksCollapsed } from '../../context/useSubtasks';
 
 // The issue's subtasks under its card, headed by how many of them are done. Each
 // row names the subtask — state, identifier, title — since a subtask has no card
@@ -24,7 +24,7 @@ export function IssueCardSubtasks({
   onOpen?: (id: number) => void;
 }) {
   const t = useTranslations('workItems');
-  const subtasks = useSubtasks(issueId);
+  const subtasks = useDescendants(issueId);
   const collapsed = useSubtasksCollapsed();
   // Null follows the display setting; a value is this one card unfolded or folded
   // by hand. Flipping the setting clears it, so the switch moves every card.
@@ -77,6 +77,7 @@ export function IssueCardSubtasks({
                     e.preventDefault();
                     onOpen?.(subtask.id);
                   }}
+                  style={{ paddingInlineStart: 6 + (subtask.nestingDepth - 1) * 16 }}
                   className={cn(
                     '-mx-1.5 flex items-center gap-2 rounded px-1.5 py-1 text-left',
                     onOpen && 'cursor-pointer hover:bg-muted/70',
@@ -93,6 +94,7 @@ export function IssueCardSubtasks({
                     {subtask.identifier}
                   </span>
                   <span
+                    style={{ paddingInlineStart: 6 + (subtask.nestingDepth - 1) * 16 }}
                     className={cn(
                       'truncate text-[11px] text-foreground/85',
                       column?.stateType === 'completed' && 'text-muted-foreground/70 line-through',

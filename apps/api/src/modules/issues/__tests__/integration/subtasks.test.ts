@@ -4,7 +4,7 @@ import { signUpTestUser } from '#tests/helpers/auth';
 import { resetDb } from '#tests/helpers/db';
 
 // Subtasks: an issue carries the id of the issue it hangs under (parentId), set on
-// create or through an update. The hierarchy is one level deep and stays inside one
+// create or through an update. The hierarchy stays inside one
 // project. An issue's parent and its subtasks come back with the issue read
 // (GET /issues/:issueId → `parent` / `subtasks`); deleting or archiving an issue
 // that has subtasks says what happens to them (cascade / detach / reassign) or is
@@ -146,22 +146,43 @@ describe('subtasks', () => {
       expect(res.status).toBe(400);
     });
 
-    it('rejects a subtask as a parent with 400 (one level deep)', async () => {
+    it('accepts a subtask as a parent', async () => {
       const { asOwner, columnId } = await setupProject();
       const { subtask } = await parentWithSubtask(asOwner, columnId);
       const other = (await createIssue(asOwner, columnId, 'Other')).data!;
 
       const res = await setParent(asOwner, other.id, subtask.id);
-      expect(res.status).toBe(400);
+      expect(res.status).toBe(200);
     });
 
-    it('rejects making an issue that has subtasks a subtask with 400', async () => {
+    it('accepts making an issue with subtasks a subtask', async () => {
       const { asOwner, columnId } = await setupProject();
       const { parent } = await parentWithSubtask(asOwner, columnId);
       const other = (await createIssue(asOwner, columnId, 'Other')).data!;
 
       const res = await setParent(asOwner, parent.id, other.id);
-      expect(res.status).toBe(400);
+      expect(res.status).toBe(200);
+    });
+
+    it('preserves four levels and rejects a cycle through a descendant', async () => {
+      const { asOwner, columnId } = await setupProject();
+      const { parent, subtask } = await parentWithSubtask(asOwner, columnId);
+      const third = (await createIssue(asOwner, columnId, 'Third')).data!;
+      const fourth = (await createIssue(asOwner, columnId, 'Fourth')).data!;
+      expect((await setParent(asOwner, third.id, subtask.id)).status).toBe(200);
+      expect((await setParent(asOwner, fourth.id, third.id)).status).toBe(200);
+      expect((await setParent(asOwner, parent.id, fourth.id)).status).toBe(400);
+    });
+
+    it('serializes competing parent changes so they cannot create a cycle', async () => {
+      const { asOwner, columnId } = await setupProject();
+      const a = (await createIssue(asOwner, columnId, 'A')).data!;
+      const b = (await createIssue(asOwner, columnId, 'B')).data!;
+      const results = await Promise.all([
+        setParent(asOwner, a.id, b.id),
+        setParent(asOwner, b.id, a.id),
+      ]);
+      expect(results.map((result) => result.status).sort()).toEqual([200, 400]);
     });
 
     it('records the change on the subtask and on both parents', async () => {
@@ -287,7 +308,50 @@ describe('subtasks', () => {
     });
   });
 
+  describe('nested automation', () => {
+    it('completes every ancestor when the final leaf is completed', async () => {
+      const { asOwner, columnId, doneColumnId } = await setupProject();
+      const { parent, subtask } = await parentWithSubtask(asOwner, columnId);
+      const third = (await createSubtask(asOwner, columnId, subtask.id, 'Third')).data!;
+      const fourth = (await createSubtask(asOwner, columnId, third.id, 'Fourth')).data!;
+      await setAutomations(asOwner, { completeParent: true, closeSubtasks: false });
+      expect((await move(asOwner, fourth.id, doneColumnId)).status).toBe(200);
+      for (const item of [parent, subtask, third])
+        expect((await read(asOwner, item.id)).columnId).toBe(doneColumnId);
+    });
+
+    it('closes descendants through an already closed intermediate parent', async () => {
+      const { asOwner, columnId, doneColumnId } = await setupProject();
+      const { parent, subtask } = await parentWithSubtask(asOwner, columnId);
+      const third = (await createSubtask(asOwner, columnId, subtask.id, 'Third')).data!;
+      await move(asOwner, subtask.id, doneColumnId);
+      await setAutomations(asOwner, { completeParent: false, closeSubtasks: true });
+      expect((await move(asOwner, parent.id, doneColumnId)).status).toBe(200);
+      expect((await read(asOwner, third.id)).columnId).toBe(doneColumnId);
+    });
+  });
+
   describe('archive', () => {
+    it('archives and restores a four-level subtree without detaching descendants', async () => {
+      const { asOwner, columnId } = await setupProject();
+      const { parent, subtask } = await parentWithSubtask(asOwner, columnId);
+      const third = (await createSubtask(asOwner, columnId, subtask.id, 'Third')).data!;
+      const fourth = (await createSubtask(asOwner, columnId, third.id, 'Fourth')).data!;
+      expect(
+        (await asOwner.issues({ issueId: parent.id }).archive.post({ subtasks: 'cascade' })).status,
+      ).toBe(200);
+      for (const child of [subtask, third, fourth]) {
+        expect((await read(asOwner, child.id)).archivedAt).not.toBeNull();
+      }
+      expect((await asOwner.issues({ issueId: parent.id }).restore.post()).status).toBe(200);
+      for (const child of [subtask, third, fourth]) {
+        expect(await read(asOwner, child.id)).toMatchObject({
+          parentId: child.parentId,
+          archivedAt: null,
+        });
+      }
+    });
+
     it('archives the subtasks with the parent on cascade', async () => {
       const { asOwner, columnId } = await setupProject();
       const { parent, subtask } = await parentWithSubtask(asOwner, columnId);

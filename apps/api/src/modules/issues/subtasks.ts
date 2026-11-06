@@ -2,12 +2,9 @@ import { db, issue, project as projectTable } from '@repo/db';
 import { and, eq, inArray, sql, type SQL } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import { HttpError } from '#shared/lib';
+import { issueTreeIds } from './hierarchy';
 import { archiveIssue, deleteIssue, restoreIssue, updateIssue } from './service';
 import type { AttachmentRow } from '#modules/attachments/service';
-
-// An issue's subtasks: issues carrying its id in parent_id. The hierarchy is one
-// level deep (see assertParent in service.ts), so a subtask has no subtasks of its
-// own and every issue is either a parent, a subtask, or neither.
 
 // A subtask or a parent as the issue page renders it: enough to name the issue and
 // show its state, without its description or field values.
@@ -85,8 +82,10 @@ export async function restoreSubtasksOf(
   issueId: number,
   actorUserId?: string | null,
 ): Promise<void> {
-  for (const subtask of await listSubtasks(issueId))
+  for (const subtask of await listSubtasks(issueId)) {
     if (subtask.archived) await restoreIssue(subtask.id, actorUserId);
+    await restoreSubtasksOf(subtask.id, actorUserId);
+  }
 }
 
 // What happens to an issue's subtasks when it is deleted or archived: they follow
@@ -122,7 +121,9 @@ export async function disposeSubtasksOf(
   // Resolved once, against the whole request: a target that is itself being
   // removed is rejected before anything is written.
   const newParentId =
-    disposition.mode === 'reassign' ? reassignTarget(disposition, issueIds) : null;
+    disposition.mode === 'reassign'
+      ? reassignTarget(disposition, await issueTreeIds(issueIds))
+      : null;
   const attachments: AttachmentRow[] = [];
   for (const parentId of parents)
     attachments.push(
@@ -157,6 +158,7 @@ async function disposeSubtasks(
   if (mode === 'cascade') {
     const attachments: AttachmentRow[] = [];
     for (const subtask of subtasks) {
+      attachments.push(...(await disposeSubtasks(subtask.id, action, mode, null, actorUserId)));
       if (action === 'delete')
         attachments.push(...((await deleteIssue(subtask.id, actorUserId)) ?? []));
       else await archiveIssue(subtask.id, actorUserId);
@@ -165,7 +167,7 @@ async function disposeSubtasks(
   }
 
   // 'detach' clears the parent, 'reassign' points it at newParentId. The rules
-  // that link has to hold (same project, no subtask as a parent) are enforced by
+  // that link has to hold (same project, no cycles) are enforced by
   // the update itself, which rejects the whole request on the first failure.
   for (const subtask of subtasks)
     await updateIssue(subtask.id, { parentId: newParentId }, actorUserId);

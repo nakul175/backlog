@@ -24,12 +24,6 @@ import IssueSubtasksFilterChip from './IssueSubtasksFilterChip';
 import IssueSubtasksFilterMenu from './IssueSubtasksFilterMenu';
 import { useTranslations } from 'next-intl';
 
-// The issue's place in the subtask hierarchy: the parent it hangs under, or the
-// subtasks it has with how many of them are done. The two never show together —
-// the hierarchy is one level deep, so a subtask has no subtasks of its own. A new
-// subtask opens the ordinary create modal with the parent's properties prefilled;
-// an existing issue is attached through the search dialog. On a public share the
-// section lists the hierarchy and stays off the page when the issue has none.
 export default function IssueSubtasksPanel({
   project,
   issue,
@@ -70,21 +64,6 @@ export default function IssueSubtasksPanel({
     });
 
   function body() {
-    if (parent)
-      return (
-        <IssueRefList>
-          <IssueRefRow
-            project={project}
-            issue={parent}
-            scrollAnchorKey={`parent:${parent.id}`}
-            removeLabel={t('detachFromParent', { parent: parent.identifier })}
-            readOnly={readOnly}
-            onOpen={onOpenIssue && (() => onOpenIssue(parent.id))}
-            onRemove={canEdit ? () => detach(issue.id, parent.id) : undefined}
-            onChangeState={canEdit ? (columnId) => setState(parent.id, columnId) : undefined}
-          />
-        </IssueRefList>
-      );
     if (issue.subtasks.length === 0)
       return (
         <p className="rounded-md border border-dashed p-4 text-center text-sm text-muted-foreground">
@@ -122,19 +101,31 @@ export default function IssueSubtasksPanel({
     <div className={`mt-6 border-t pt-5 ${open ? '' : '-mb-2'}`}>
       {/* Fixed height: the buttons only render while the section is open, and
           without it the row would shrink to the height of the heading text. */}
+      {parent && (
+        <div className="mb-4">
+          <h3 className="mb-2 text-sm font-medium">{t('parent')}</h3>
+          <IssueRefList>
+            <IssueRefRow
+              project={project}
+              issue={parent}
+              scrollAnchorKey={`parent:${parent.id}`}
+              removeLabel={t('detachFromParent', { parent: parent.identifier })}
+              readOnly={readOnly}
+              onOpen={onOpenIssue && (() => onOpenIssue(parent.id))}
+              onRemove={canEdit ? () => detach(issue.id, parent.id) : undefined}
+              onChangeState={canEdit ? (columnId) => setState(parent.id, columnId) : undefined}
+            />
+          </IssueRefList>
+        </div>
+      )}
       <div className={`flex h-7 items-center justify-between gap-3 ${open ? 'mb-3' : ''}`}>
         <div className="flex min-w-0 items-center gap-2">
-          <IssueSectionHeading
-            label={parent ? t('parent') : t('title')}
-            open={open}
-            onToggle={toggle}
-            tally={done}
-          />
-          {open && !parent && <IssueSubtasksFilterChip filter={filter} />}
+          <IssueSectionHeading label={t('title')} open={open} onToggle={toggle} tally={done} />
+          {open && <IssueSubtasksFilterChip filter={filter} />}
         </div>
         <div className="flex shrink-0 items-center gap-1">
-          {open && !parent && <IssueSubtasksFilterMenu filter={filter} />}
-          {open && !parent && canEdit && (
+          {open && <IssueSubtasksFilterMenu filter={filter} />}
+          {open && canEdit && (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button
@@ -169,9 +160,7 @@ export default function IssueSubtasksPanel({
           projectKey={project.project.ref}
           title={t('addExisting')}
           prompt={t('searchPrompt')}
-          // The hierarchy is one level deep, so an issue that already hangs under
-          // a parent has to be detached there first.
-          exclude={(hit) => hit.id === issue.id || hit.parentId !== null}
+          exclude={(hit) => hit.id === issue.id}
           onPick={(hit) => {
             setParent.mutate({
               projectKey: project.project.ref,
