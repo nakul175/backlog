@@ -1,0 +1,188 @@
+{
+  "account": {
+    "profile": "Profile",
+    "preferences": "Preferences",
+    "accounts": "Accounts",
+    "security": "Security",
+    "api-keys": "API keys"
+  },
+  "godGroups": {
+    "management": "Management",
+    "instance": "Instance",
+    "security": "Security"
+  },
+  "god": {
+    "users": {
+      "label": "Users",
+      "description": "Every account on this instance: the global role, whether the address is confirmed, and the projects each user can reach."
+    },
+    "teams": {
+      "label": "Teams",
+      "description": "Every team on this instance: the projects it owns and who belongs to it."
+    },
+    "projects": {
+      "label": "Projects",
+      "description": "Every project on this instance: what each one holds, when it was last active, and who can reach it."
+    },
+    "general": {
+      "label": "General",
+      "description": "Personal workspaces, defaults for new projects, and agent traces."
+    },
+    "authentication": {
+      "label": "Authentication",
+      "description": "Who may register on this instance, how accounts are confirmed, and the providers people sign in with."
+    },
+    "hotkeys": {
+      "label": "Keyboard shortcuts",
+      "description": "The key each command is bound to for everyone on this instance. Each person can rebind a shortcut for their own account in their preferences."
+    },
+    "storage": {
+      "label": "Storage",
+      "description": "How much people may upload: the size of a single file, the attachment types accepted, and the storage each project gets."
+    },
+    "telegram": {
+      "label": "Telegram",
+      "description": "The bot people connect their Telegram account to, and the one that delivers Telegram notifications for projects that set no bot of their own."
+    },
+    "email": {
+      "label": "Email provider",
+      "description": "The mail provider the instance sends through: password resets, address confirmation, and sign-in links."
+    },
+    "auth-provider": {
+      "label": "Auth provider",
+      "description": "The external accounts people may sign in with."
+    },
+    "scim": {
+      "label": "SCIM",
+      "description": "Let an identity provider create, update and deactivate accounts on this instance, and grant project access through its groups."
+    },
+    "audit-log": {
+      "label": "Audit log",
+      "description": "Who did what on this instance, when, and where they did it from."
+    }
+  },
+  "settings": {
+    "general": {
+      "label": "General",
+      "description": "The project's name, description, and the sections it shows."
+    },
+    "states": {
+      "label": "States",
+      "description": "The workflow states issues move through, each shown as a column."
+    },
+    "issue-types": {
+      "label": "Issue types",
+      "description": "The kinds of issues this project can hold, each with its own fields."
+    },
+    "labels": {
+      "label": "Labels",
+      "description": "Tags for organizing and filtering issues across the project."
+    },
+    "custom-fields": {
+      "label": "Custom fields",
+      "description": "Extra fields shown on issues, global or scoped to an issue type."
+    },
+    "issue-templates": {
+      "label": "Issue templates",
+      "description": "Presets a new issue can be created from: its title, description, and properties."
+    },
+    "configuration": {
+      "label": "Configuration",
+      "description": "How subtasks close with their parent, and when stale issues are archived."
+    },
+    "actions": {
+      "label": "Actions",
+      "description": "Buttons on an issue that set fields in one click."
+    },
+    "schedules": {
+      "label": "Schedules",
+      "description": "Run agent tasks on a recurring schedule."
+    },
+    "webhooks": {
+      "label": "Webhooks",
+      "description": "Send project events to external URLs, signed with a per-webhook secret."
+    },
+    "git": {
+      "label": "Repositories",
+      "description": "Close issues when their pull requests merge on GitHub, GitLab, Gitea, Forgejo, or Bitbucket."
+    },
+    "import-export": {
+      "label": "Import/Export",
+      "description": "Bring issues, comments, and labels in from a self-hosted Plane instance, or export this project's data as JSON."
+    },
+    "ai-agents": {
+      "label": "AI Agents",
+      "description": "AI agents working in this project."
+    }
+  },
+  "previews": {
+    "available": "Available in Cloud and self-hosted Pro.",
+    "dashboard": {
+      "title": "Dashboard",
+      "description": "Activity across the teams and projects of this workspace.",
+      "summary": {
+        "teams": "Teams",
+        "projects": "Projects",
+        "people": "People",
+        "agents": "AI agents",
+        "openIssues": "Open issues",
+        "storage": "Storage"
+      },
+      "blocks": {
+        "agents": "AI agents",
+        "schedules": "Scheduled runs",
+        "time": "Time logged",
+        "flow": "Issue flow",
+        "projects": "Active projects",
+        "teams": "Active teams"
+      }
+    },
+    "agentBudgets": {
+      "title": "AI budgets",
+      "description": "Limits on what agents spend on models.",
+      "workspace": "Whole workspace",
+      "figures": {
+        "spent": "Spent",
+        "limit": "Limit",
+        "left": "Left",
+        "forecast": "Forecast for the period"
+      },
+      "list": "Budgets",
+      "columns": {
+        "budget": "Budget",
+        "spent": "Spent"
+      }
+    },
+    "auditLog": {
+      "title": "Audit log",
+      "description": "Who did what in this workspace, its teams and projects, and when its people signed in.",
+      "columns": {
+        "time": "Time",
+        "actor": "Who",
+        "action": "Action",
+        "where": "Where",
+        "from": "From"
+      }
+    },
+    "emailDomains": {
+      "title": "Email domains",
+      "description": "Choose which email domains can join this workspace.",
+      "label": "Allowed email domains",
+      "hint": "Only addresses at these domains can be invited or added through SCIM, and invited people can sign up with them. Leave empty to use the instance's domains. Current members keep their access."
+    },
+    "sso": {
+      "title": "Single sign-on",
+      "description": "Let people of this workspace sign in with your company's identity provider.",
+      "provider": "Identity provider",
+      "providerHint": "Enter what your identity provider gives you, then add the addresses below to it.",
+      "fields": {
+        "domains": "Email domains",
+        "entryPoint": "Sign-in URL",
+        "entityId": "Provider entity ID",
+        "certificate": "Signing certificate",
+        "acsUrl": "ACS URL",
+        "spEntityId": "Entity ID and metadata"
+      }
+    }
+  }
+}

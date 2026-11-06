@@ -1,0 +1,14 @@
+{
+  "placeholder": "Type a command or search…",
+  "noResults": "No results found.",
+  "issues": "Issues",
+  "searching": "Searching…",
+  "selectAllIssues": "Select all issues",
+  "newIssue": "New issue",
+  "newInitiative": "New initiative",
+  "newProject": "New project",
+  "toggleChat": "Show or hide the AI chat",
+  "board": "Board",
+  "commands": "Commands",
+  "switchProject": "Switch project"
+}

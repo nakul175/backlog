@@ -1,0 +1,12 @@
+{
+  "updateAvailable": "Update available",
+  "releaseHistory": "Release history",
+  "running": "You’re running {current}.",
+  "badgeRunning": "Running",
+  "badgeNew": "New",
+  "check": "Check for updates",
+  "checking": "Checking",
+  "lastChecked": "Last checked",
+  "allReleases": "All releases",
+  "noNotes": "This release has no notes."
+}

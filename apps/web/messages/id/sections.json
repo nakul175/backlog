@@ -1,0 +1,188 @@
+{
+  "account": {
+    "profile": "Profil",
+    "preferences": "Preferensi",
+    "accounts": "Akun",
+    "security": "Keamanan",
+    "api-keys": "Kunci API"
+  },
+  "godGroups": {
+    "management": "Manajemen",
+    "instance": "Instance",
+    "security": "Keamanan"
+  },
+  "god": {
+    "users": {
+      "label": "Pengguna",
+      "description": "Setiap akun di instance ini: peran global, status konfirmasi alamat, dan proyek yang dapat diakses setiap pengguna."
+    },
+    "teams": {
+      "label": "Tim",
+      "description": "Setiap tim di instance ini: proyek yang dimilikinya dan anggota di dalamnya."
+    },
+    "projects": {
+      "label": "Proyek",
+      "description": "Setiap proyek di instance ini: apa yang dimuatnya, waktu aktif terakhir, dan siapa yang dapat mengaksesnya."
+    },
+    "general": {
+      "label": "Umum",
+      "description": "Workspace pribadi, pengaturan bawaan untuk proyek baru, dan trace agen."
+    },
+    "authentication": {
+      "label": "Autentikasi",
+      "description": "Siapa yang boleh mendaftar di instance ini, cara akun dikonfirmasi, dan penyedia yang digunakan untuk masuk."
+    },
+    "hotkeys": {
+      "label": "Pintasan keyboard",
+      "description": "Tombol yang terikat ke setiap perintah untuk semua orang di instance ini. Setiap orang dapat mengatur ulang pintasan untuk akun mereka sendiri di preferensi."
+    },
+    "storage": {
+      "label": "Penyimpanan",
+      "description": "Batas unggahan pengguna: ukuran file tunggal, jenis lampiran yang diterima, dan ruang penyimpanan untuk setiap proyek."
+    },
+    "telegram": {
+      "label": "Telegram",
+      "description": "Bot yang dihubungkan pengguna ke akun Telegram mereka, dan bot yang mengirimkan notifikasi Telegram untuk proyek yang tidak menetapkan bot sendiri."
+    },
+    "email": {
+      "label": "Penyedia email",
+      "description": "Penyedia email yang digunakan instance: pengaturan ulang kata sandi, konfirmasi alamat, dan tautan masuk."
+    },
+    "auth-provider": {
+      "label": "Penyedia autentikasi",
+      "description": "Akun eksternal yang dapat digunakan pengguna untuk masuk."
+    },
+    "scim": {
+      "label": "SCIM",
+      "description": "Izinkan penyedia identitas membuat, memperbarui, dan menonaktifkan akun di instance ini, serta memberikan akses proyek melalui grupnya."
+    },
+    "audit-log": {
+      "label": "Log audit",
+      "description": "Siapa melakukan apa di instance ini, kapan, dan dari mana."
+    }
+  },
+  "settings": {
+    "general": {
+      "label": "Umum",
+      "description": "Nama proyek, deskripsi, dan bagian yang ditampilkannya."
+    },
+    "states": {
+      "label": "Status",
+      "description": "Status alur kerja yang dilalui issue, masing-masing ditampilkan sebagai kolom."
+    },
+    "issue-types": {
+      "label": "Tipe issue",
+      "description": "Jenis issue yang dapat dimuat proyek ini, masing-masing dengan bidangnya sendiri."
+    },
+    "labels": {
+      "label": "Label",
+      "description": "Tag untuk mengorganisasi dan memfilter issue di seluruh proyek."
+    },
+    "custom-fields": {
+      "label": "Bidang kustom",
+      "description": "Bidang tambahan yang ditampilkan pada issue, berlaku global atau terbatas pada tipe issue tertentu."
+    },
+    "issue-templates": {
+      "label": "Templat issue",
+      "description": "Preset untuk membuat issue baru: judul, deskripsi, dan propertinya."
+    },
+    "configuration": {
+      "label": "Konfigurasi",
+      "description": "Cara subtugas ditutup bersama induknya, dan kapan issue usang diarsipkan."
+    },
+    "actions": {
+      "label": "Tindakan",
+      "description": "Tombol pada issue yang mengatur bidang dalam sekali klik."
+    },
+    "schedules": {
+      "label": "Jadwal",
+      "description": "Jalankan tugas agen dengan jadwal berulang."
+    },
+    "webhooks": {
+      "label": "Webhook",
+      "description": "Kirim peristiwa proyek ke URL eksternal, ditandatangani dengan rahasia per-webhook."
+    },
+    "git": {
+      "label": "Repositori",
+      "description": "Tutup issue saat pull request digabungkan di GitHub, GitLab, Gitea, Forgejo, atau Bitbucket."
+    },
+    "import-export": {
+      "label": "Impor/Ekspor",
+      "description": "Impor issue, komentar, dan label dari instans Plane self-hosted, atau ekspor data proyek ini sebagai JSON."
+    },
+    "ai-agents": {
+      "label": "Agen AI",
+      "description": "Agen AI yang bekerja dalam proyek ini."
+    }
+  },
+  "previews": {
+    "available": "Tersedia di Cloud dan Pro self-hosted.",
+    "dashboard": {
+      "title": "Dasbor",
+      "description": "Aktivitas tim dan proyek di workspace ini.",
+      "summary": {
+        "teams": "Tim",
+        "projects": "Proyek",
+        "people": "Orang",
+        "agents": "Agen AI",
+        "openIssues": "Issue terbuka",
+        "storage": "Penyimpanan"
+      },
+      "blocks": {
+        "agents": "Agen AI",
+        "schedules": "Eksekusi terjadwal",
+        "time": "Waktu dicatat",
+        "flow": "Arus issue",
+        "projects": "Proyek aktif",
+        "teams": "Tim aktif"
+      }
+    },
+    "agentBudgets": {
+      "title": "Anggaran AI",
+      "description": "Batas pengeluaran agen untuk model.",
+      "workspace": "Seluruh ruang kerja",
+      "figures": {
+        "spent": "Terpakai",
+        "limit": "Batas",
+        "left": "Sisa",
+        "forecast": "Perkiraan hingga akhir periode"
+      },
+      "list": "Anggaran",
+      "columns": {
+        "budget": "Anggaran",
+        "spent": "Terpakai"
+      }
+    },
+    "auditLog": {
+      "title": "Log audit",
+      "description": "Siapa melakukan apa di workspace ini, tim dan proyeknya, serta kapan orang-orangnya masuk.",
+      "columns": {
+        "time": "Waktu",
+        "actor": "Siapa",
+        "action": "Tindakan",
+        "where": "Di mana",
+        "from": "Asal"
+      }
+    },
+    "emailDomains": {
+      "title": "Domain email",
+      "description": "Pilih domain email yang bisa bergabung ke workspace ini.",
+      "label": "Domain email yang diizinkan",
+      "hint": "Hanya alamat di domain ini yang bisa diundang atau ditambahkan lewat SCIM, dan orang yang diundang bisa mendaftar dengannya. Kosongkan untuk memakai domain instance. Anggota saat ini tetap punya akses."
+    },
+    "sso": {
+      "title": "Single sign-on",
+      "description": "Izinkan orang di workspace ini masuk dengan penyedia identitas perusahaan Anda.",
+      "provider": "Penyedia identitas",
+      "providerHint": "Masukkan data dari penyedia identitas Anda, lalu tambahkan alamat di bawah ke penyedia itu.",
+      "fields": {
+        "domains": "Domain email",
+        "entryPoint": "URL masuk",
+        "entityId": "Entity ID penyedia",
+        "certificate": "Sertifikat penandatanganan",
+        "acsUrl": "URL ACS",
+        "spEntityId": "Entity ID dan metadata"
+      }
+    }
+  }
+}

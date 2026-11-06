@@ -1,0 +1,293 @@
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Bot, User } from 'lucide-react';
+import type { Assignee } from '@/lib/api/endpoints/projects';
+import Avatar from '@/components/common/Avatar';
+import { Button } from '@/components/ui/button';
+import { Textarea } from '@/components/ui/textarea';
+import { cn } from '@/lib/utils';
+import { useSession } from '@/lib/auth-client';
+import { offersMention } from '@/hooks/useMentionCandidates';
+import { useCreateComment, useUpdateComment } from '../../services/comments.service';
+import { useTranslations } from 'next-intl';
+
+// The comment box, for a new comment or for editing one: a plain markdown textarea
+// with an @-mention menu. Typing "@" opens a menu of the project's members and
+// agents; picking one writes their handle as @username into the body. That handle is
+// what the backend resolves to notify a member or trigger an agent, and what the
+// feed renders as a chip. Posts or saves as the current session user on the button
+// or Cmd/Ctrl+Enter.
+
+// What every composer needs to post, gathered once by the activity feed: the issue,
+// who can be mentioned, and the author the avatar stands for.
+export interface ComposerContext {
+  issueId: number;
+  assignees: Assignee[];
+  authorName: string;
+  authorImage: string | null;
+}
+
+// The active "@query" being typed: the text after the "@" and the body index of the
+// "@" itself, so a pick can replace the whole "@query" span.
+interface MentionQuery {
+  query: string;
+  anchor: number;
+}
+
+export default function CommentComposer({
+  issueId,
+  assignees,
+  authorName,
+  authorImage,
+  replyToId,
+  replyToName,
+  onClose,
+  commentId,
+  initialBody,
+}: ComposerContext & {
+  // Set on the reply box a thread opens: the comment it answers and its author.
+  replyToId?: number;
+  replyToName?: string | null;
+  // Closes the box — on the cancel button, on Escape, and once the comment is
+  // posted or saved. The boxes a thread opens (reply, edit) are the only ones that
+  // can be closed.
+  onClose?: () => void;
+  // Set when the box edits an existing comment instead of posting a new one.
+  commentId?: number;
+  initialBody?: string;
+}) {
+  const t = useTranslations('issue.comments');
+  const tCommon = useTranslations('common');
+  const createComment = useCreateComment();
+  const updateComment = useUpdateComment();
+  const [body, setBody] = useState(initialBody ?? '');
+  const [menu, setMenu] = useState<MentionQuery | null>(null);
+  const [active, setActive] = useState(0);
+  const [pendingCaret, setPendingCaret] = useState<number | null>(null);
+  const [focused, setFocused] = useState(false);
+  const taRef = useRef<HTMLTextAreaElement | null>(null);
+  const { data: session } = useSession();
+  const currentUserId = session?.user.id ?? null;
+
+  const isReply = replyToId != null;
+  const isEdit = commentId != null;
+  const posting = (isEdit ? updateComment : createComment).isPending;
+  const cmdKey = typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform) ? '⌘' : 'Ctrl';
+
+  // The same people and agents the markdown editors offer: an agent a mention would
+  // leave silent is not listed. An internal agent runs in the built-in runtime; an
+  // external agent is reached over its operator's webhook, which receives the comment.
+  const matches = useMemo(() => {
+    if (!menu) return [];
+    const q = menu.query.toLowerCase();
+    return assignees
+      .filter(
+        (a) =>
+          offersMention(a, currentUserId) &&
+          (a.name.toLowerCase().includes(q) || a.username!.toLowerCase().includes(q)),
+      )
+      .slice(0, 8);
+  }, [assignees, menu, currentUserId]);
+
+  // A reply box or an edit box is opened by a deliberate click, so it takes the
+  // caret — at the end of the text being edited.
+  useEffect(() => {
+    const ta = taRef.current;
+    if (!ta || (!isReply && !isEdit)) return;
+    ta.focus();
+    if (isEdit) ta.setSelectionRange(ta.value.length, ta.value.length);
+  }, [isReply, isEdit]);
+
+  // Restore the caret after a mention is inserted (the body change is async, so the
+  // caret has to be set once the new value has rendered).
+  useEffect(() => {
+    if (pendingCaret == null) return;
+    const ta = taRef.current;
+    if (ta) {
+      ta.focus();
+      ta.setSelectionRange(pendingCaret, pendingCaret);
+    }
+    setPendingCaret(null);
+  }, [pendingCaret]);
+
+  // Opens the mention menu when the text right before the caret is an "@query"
+  // (an @ at a word boundary followed by non-space, non-@ characters).
+  function onChange(value: string, caret: number) {
+    setBody(value);
+    const before = value.slice(0, caret);
+    const m = before.match(/(?:^|\s)@([^\s@]*)$/);
+    if (m) {
+      setMenu({ query: m[1], anchor: caret - m[1].length - 1 });
+      setActive(0);
+    } else {
+      setMenu(null);
+    }
+  }
+
+  function selectMention(a: Assignee) {
+    if (!menu || !a.username) return;
+    const handle = `@${a.username}`;
+    const caret = taRef.current?.selectionStart ?? body.length;
+    const next = `${body.slice(0, menu.anchor)}${handle} ${body.slice(caret)}`;
+    setBody(next);
+    setMenu(null);
+    setPendingCaret(menu.anchor + handle.length + 1);
+  }
+
+  async function post() {
+    const next = body.trim();
+    if (!next) return;
+    if (isEdit) {
+      if (next === initialBody?.trim()) return onClose?.();
+      await updateComment.mutateAsync({ issueId, commentId: commentId!, body: next });
+    } else {
+      await createComment.mutateAsync({ issueId, input: { body: next, replyToId } });
+      setBody('');
+    }
+    setMenu(null);
+    onClose?.();
+  }
+
+  function onKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (menu && matches.length > 0) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setActive((i) => (i + 1) % matches.length);
+        return;
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setActive((i) => (i - 1 + matches.length) % matches.length);
+        return;
+      }
+      if (e.key === 'Enter' || e.key === 'Tab') {
+        e.preventDefault();
+        selectMention(matches[Math.min(active, matches.length - 1)]);
+        return;
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        setMenu(null);
+        return;
+      }
+    }
+    if (e.key === 'Escape' && onClose) {
+      e.preventDefault();
+      onClose();
+      return;
+    }
+    // Cmd/Ctrl+Enter submits, matching the rest of the planner.
+    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') void post();
+  }
+
+  let placeholder = t('placeholder');
+  if (isReply)
+    placeholder = replyToName ? t('replyTo', { name: replyToName }) : t('replyPlaceholder');
+
+  let submitLabel = isReply ? t('reply') : t('comment');
+  if (isEdit) submitLabel = tCommon('save');
+  if (posting) submitLabel = isEdit ? tCommon('saving') : t('posting');
+
+  // The reply and edit boxes open inside a thread, so they render compact and
+  // without the bottom gap the standalone composer keeps.
+  const compact = isReply || isEdit;
+  // The standalone box stays one line until it is used, so it weighs no more than
+  // the feed under it; it grows its footer once focused or holding a draft.
+  const expanded = compact || focused || body.length > 0;
+
+  return (
+    <div className={cn(!compact && 'mb-5')}>
+      <div className="flex gap-3">
+        <Avatar
+          name={authorName}
+          image={authorImage}
+          className={cn('shrink-0 text-[11px]', compact ? 'mt-0.5 size-6' : 'mt-1.5 size-7')}
+          title={t('commentAs', { name: authorName })}
+        />
+        <div className="relative min-w-0 flex-1">
+          <div className="overflow-hidden rounded-lg border bg-muted/20 shadow-xs transition-[border-color,box-shadow] focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/30">
+            <Textarea
+              ref={taRef}
+              // `auto` once there is something to read, so a comment keeps the
+              // script it was typed in. An empty box has nothing to read from, and
+              // would fall back to left-to-right and strand the placeholder.
+              dir={body ? 'auto' : undefined}
+              value={body}
+              onChange={(e) =>
+                onChange(e.target.value, e.target.selectionStart ?? e.target.value.length)
+              }
+              onFocus={() => setFocused(true)}
+              onBlur={() => {
+                setMenu(null);
+                setFocused(false);
+              }}
+              placeholder={placeholder}
+              className={cn(
+                'resize-none rounded-none border-0 bg-transparent px-3 py-2.5 shadow-none focus-visible:ring-0',
+                !expanded ? 'min-h-10' : compact ? 'min-h-[52px]' : 'min-h-[64px]',
+              )}
+              onKeyDown={onKeyDown}
+            />
+            {expanded && (
+              <div className="flex items-center justify-between gap-2 border-t px-2.5 py-2">
+                {isEdit ? (
+                  <span />
+                ) : (
+                  <span className="text-[11px] text-muted-foreground/70">
+                    <kbd className="rounded bg-muted px-1.5 py-0.5 font-sans text-[10px] font-medium">
+                      {cmdKey} ↵
+                    </kbd>
+                    <span className="ml-1.5">{t('toSend')}</span>
+                  </span>
+                )}
+                <div className="flex items-center gap-1.5">
+                  {onClose && (
+                    <Button size="sm" variant="ghost" onClick={onClose}>
+                      {t('cancel')}
+                    </Button>
+                  )}
+                  <Button size="sm" disabled={!body.trim() || posting} onClick={() => void post()}>
+                    {submitLabel}
+                  </Button>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {menu && matches.length > 0 && (
+            <ul className="absolute top-full right-0 left-0 z-20 mt-1 max-h-64 overflow-y-auto rounded-md border bg-popover p-1 text-popover-foreground shadow-md">
+              {matches.map((a, i) => (
+                <li key={a.userId}>
+                  <button
+                    type="button"
+                    // Keep the textarea focused so the caret survives the click.
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      selectMention(a);
+                    }}
+                    onMouseEnter={() => setActive(i)}
+                    className={`flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm ${
+                      i === active ? 'bg-accent text-accent-foreground' : ''
+                    }`}
+                  >
+                    {a.kind === 'agent' ? (
+                      <Bot className="size-4 shrink-0" />
+                    ) : (
+                      <User className="size-4 shrink-0" />
+                    )}
+                    <span className="truncate">{a.name}</span>
+                    <span className="flex-1 truncate text-xs text-muted-foreground">
+                      @{a.username}
+                    </span>
+                    {a.kind === 'agent' && (
+                      <span className="text-[10px] text-muted-foreground uppercase">agent</span>
+                    )}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}

@@ -1,0 +1,29 @@
+{
+  "editAction": "Edit project",
+  "copyAction": "Copy project",
+  "deleteAction": "Delete project",
+  "leaveAction": "Leave project",
+  "archiveAction": "Archive project",
+  "restoreAction": "Restore project",
+  "archived": "{name} archived",
+  "restored": "{name} restored",
+  "deleteDialog": {
+    "title": "Delete {name}?",
+    "confirm": "Delete permanently",
+    "description": "This permanently deletes <strong>{name}</strong> and everything in it: issues, comments, attachments, and settings. This cannot be undone.",
+    "typeToConfirm": "Type <code>{key}</code> to confirm."
+  },
+  "leaveDialog": {
+    "title": "Leave {name}?",
+    "confirm": "Leave project",
+    "description": "You will lose access to <strong>{name}</strong> and its work items. To join again you need a new invite from an owner."
+  },
+  "editDialog": {
+    "title": "Edit project",
+    "key": "Key",
+    "keyHint": "Issue links need a key of capital letters and digits that starts with a letter. After you save it, the key cannot change.",
+    "name": "Name",
+    "description": "Description",
+    "submit": "Save"
+  }
+}

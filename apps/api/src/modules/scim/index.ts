@@ -1,0 +1,475 @@
+import { Elysia, t } from 'elysia';
+import { verifyScimToken } from '@repo/auth';
+import { HttpError } from '#shared/lib';
+import { noContent } from '#shared/http';
+import {
+  SCIM_CONTENT_TYPE,
+  SCIM_PREFIX,
+  ScimError,
+  asBoolean,
+  asString,
+  groupDisplayNames,
+  joinName,
+  memberFilterIds,
+  memberIds,
+  parseFilter,
+  parsePatch,
+  readAccountEmail,
+  readEmail,
+  readUserNameEmail,
+  scimErrorBody,
+  splitName,
+  toListResponse,
+  toScimGroup,
+  toScimUser,
+} from './resource';
+import { RESOURCE_TYPES, SCHEMAS, SERVICE_PROVIDER_CONFIG } from './discovery';
+import {
+  ScimDocumentListResponse,
+  ScimDocumentResponse,
+  ScimGroupListResponse,
+  ScimGroupResponse,
+  ScimUserListResponse,
+  ScimUserResponse,
+  listQuery,
+  resourceParams,
+  scimErrors,
+} from './model';
+import {
+  GROUP_FILTER_ATTRIBUTES,
+  USER_FILTER_ATTRIBUTES,
+  createScimGroup,
+  createScimUser,
+  deleteScimGroup,
+  deleteScimUser,
+  getScimGroup,
+  getScimUser,
+  listScimGroups,
+  listScimUsers,
+  syncEmbeddedGroups,
+  updateScimGroup,
+  updateScimUser,
+} from './service';
+
+// SCIM 2.0 provisioning (RFC 7643 / 7644). An identity provider pushes users and
+// groups here with a SCIM bearer token, and every request acts for the provider it
+// opens: the instance's (`workspaceId` null) or a workspace's.
+
+function extractToken(authorization: string | undefined): string | null {
+  return authorization?.match(/^Bearer\s+(.+)$/i)?.[1] ?? null;
+}
+
+// The bodies are read as `t.Any()`: SCIM defines its own schemas and clients send
+// attributes this app ignores, so rejecting an unknown field would fail a
+// provisioning run over something harmless. The shapes are checked in resource.ts,
+// which raises SCIM errors rather than the planner's validation error.
+const anyBody = { body: t.Any() };
+
+// The name and address of the account. The instance's provider keeps them in step. For a
+// workspace's they are the person's own, not the workspace's, so a provider that sends
+// them on every sync gets them accepted and left as they are.
+const ACCOUNT_ATTRIBUTE = /^(username|displayname|name(\..+)?|emails(\[.*])?(\..+)?)$/;
+
+// What one PATCH operation on an account attribute sets. `name` is the name before it,
+// which a partial name change completes.
+function accountOp(path: string, value: unknown, name: string): { email?: string; name?: string } {
+  if (path === 'username') return { email: readUserNameEmail(value) };
+  if (path.startsWith('emails')) return { email: readEmail(value) };
+  if (path === 'displayname' || path === 'name.formatted') return { name: asString(value, 'name') };
+  if (path === 'name') return { name: joinName(value as never, name) };
+  if (path === 'name.givenname' || path === 'name.familyname') {
+    const key = path === 'name.givenname' ? 'givenName' : 'familyName';
+    return { name: joinName({ ...splitName(name), [key]: asString(value, 'name') }, name) };
+  }
+  return {};
+}
+
+// A create or replace body, cast and checked. Guards the four spots that read
+// `doc.<attribute>` straight off the request body: without this, a request that
+// reached the handler with no body (a client-parse mismatch, or a body Elysia
+// left unparsed) would throw inside the handler instead of answering a SCIM 400.
+function asDoc(body: unknown): Record<string, unknown> {
+  if (!body || typeof body !== 'object') {
+    throw new ScimError(400, 'A JSON object body is required', 'invalidSyntax');
+  }
+  return body as Record<string, unknown>;
+}
+
+function requestedPage(query: { startIndex?: number; count?: number }) {
+  return {
+    startIndex: Math.max(1, query.startIndex ?? 1),
+    count: Math.min(Math.max(query.count ?? 100, 0), 200),
+  };
+}
+
+const scimHandlers = new Elysia({
+  name: 'scim-handlers',
+  prefix: SCIM_PREFIX,
+  detail: { tags: ['SCIM'] },
+})
+  // RFC 7644 §3.1 allows a SCIM client to send `application/scim+json`, and real
+  // identity providers (Okta, Entra, Authentik) do. Elysia's default body parser
+  // matches `Content-Type` exactly against `application/json`, so a request sent
+  // with the SCIM type would otherwise leave `body` undefined instead of parsed.
+  // Falling through (returning undefined) for anything else keeps plain
+  // `application/json` on Elysia's own parser.
+  .onParse(({ request, contentType }) => {
+    if (contentType?.includes('json')) return request.json();
+  })
+  .resolve(async ({ headers, set }) => {
+    set.headers['content-type'] = SCIM_CONTENT_TYPE;
+    const token = extractToken(headers.authorization);
+    // One answer for "off", "no token" and "wrong token": whether provisioning is
+    // configured is not something an unauthenticated caller should learn.
+    const provider = token ? await verifyScimToken(token) : null;
+    if (!provider) throw new ScimError(401, 'Invalid or missing SCIM bearer token');
+    return { workspaceId: provider.workspaceId };
+  })
+
+  // ── Discovery ───────────────────────────────────────────────────────────────
+
+  .get('/ServiceProviderConfig', () => SERVICE_PROVIDER_CONFIG, {
+    response: { 200: ScimDocumentResponse, ...scimErrors(401) },
+    detail: { summary: 'Get the SCIM service provider configuration' },
+  })
+
+  .get('/ResourceTypes', () => toListResponse(RESOURCE_TYPES, RESOURCE_TYPES.length, 1), {
+    response: { 200: ScimDocumentListResponse, ...scimErrors(401) },
+    detail: { summary: 'List the SCIM resource types' },
+  })
+
+  .get(
+    '/ResourceTypes/:id',
+    ({ params }) => {
+      const found = RESOURCE_TYPES.find((r) => r.id === params.id);
+      if (!found) throw new ScimError(404, `Resource type '${params.id}' not found`);
+      return found;
+    },
+    {
+      params: resourceParams,
+      response: { 200: ScimDocumentResponse, ...scimErrors(401, 404) },
+      detail: { summary: 'Get one SCIM resource type' },
+    },
+  )
+
+  .get('/Schemas', () => toListResponse(SCHEMAS, SCHEMAS.length, 1), {
+    response: { 200: ScimDocumentListResponse, ...scimErrors(401) },
+    detail: { summary: 'List the SCIM schemas' },
+  })
+
+  .get(
+    '/Schemas/:id',
+    ({ params }) => {
+      const found = SCHEMAS.find((s) => s.id === params.id);
+      if (!found) throw new ScimError(404, `Schema '${params.id}' not found`);
+      return found;
+    },
+    {
+      params: resourceParams,
+      response: { 200: ScimDocumentResponse, ...scimErrors(401, 404) },
+      detail: { summary: 'Get one SCIM schema' },
+    },
+  )
+
+  // ── Users ───────────────────────────────────────────────────────────────────
+
+  .get(
+    '/Users',
+    async ({ workspaceId, query }) => {
+      const page = requestedPage(query);
+      const { records, total } = await listScimUsers(workspaceId, {
+        filter: parseFilter(query.filter, USER_FILTER_ATTRIBUTES),
+        ...page,
+      });
+      return toListResponse(records.map(toScimUser), total, page.startIndex);
+    },
+    {
+      query: listQuery,
+      response: { 200: ScimUserListResponse, ...scimErrors(400, 401) },
+      detail: { summary: 'List provisioned users' },
+    },
+  )
+
+  .post(
+    '/Users',
+    async ({ workspaceId, body, set }) => {
+      const doc = asDoc(body);
+      const email = readAccountEmail(doc);
+      const record = await createScimUser(workspaceId, {
+        email,
+        name: joinName(doc.name as never, (doc.displayName as string) || email),
+        active: doc.active === undefined ? true : asBoolean(doc.active),
+        externalId: typeof doc.externalId === 'string' ? doc.externalId : null,
+      });
+      await syncEmbeddedGroups(workspaceId, record.id, groupDisplayNames(doc.groups));
+      set.status = 201;
+      return toScimUser(record);
+    },
+    {
+      ...anyBody,
+      response: { 201: ScimUserResponse, ...scimErrors(400, 401, 409) },
+      detail: { summary: 'Provision a user' },
+    },
+  )
+
+  .get(
+    '/Users/:id',
+    async ({ workspaceId, params }) => toScimUser(await requireUser(workspaceId, params.id)),
+    {
+      params: resourceParams,
+      response: { 200: ScimUserResponse, ...scimErrors(401, 404) },
+      detail: { summary: 'Get one provisioned user' },
+    },
+  )
+
+  .put(
+    '/Users/:id',
+    async ({ workspaceId, params, body }) => {
+      const doc = asDoc(body);
+      const account =
+        workspaceId === null
+          ? {
+              email: readAccountEmail(doc),
+              name: joinName(
+                doc.name as never,
+                (doc.displayName as string) || (await requireUser(workspaceId, params.id)).name,
+              ),
+            }
+          : {};
+      const updated = await updateScimUser(workspaceId, params.id, {
+        ...account,
+        active: doc.active === undefined ? true : asBoolean(doc.active),
+        externalId: typeof doc.externalId === 'string' ? doc.externalId : null,
+      });
+      const record = requireUpdated(updated, 'User', params.id);
+      await syncEmbeddedGroups(workspaceId, params.id, groupDisplayNames(doc.groups));
+      return toScimUser(record);
+    },
+    {
+      params: resourceParams,
+      ...anyBody,
+      response: { 200: ScimUserResponse, ...scimErrors(400, 401, 404, 409) },
+      detail: { summary: 'Replace a provisioned user' },
+    },
+  )
+
+  .patch(
+    '/Users/:id',
+    async ({ workspaceId, params, body }) => {
+      const patch: { email?: string; name?: string; active?: boolean; externalId?: string | null } =
+        {};
+      const ops = parsePatch(body);
+      // The address comes from `emails` when the request carries it, as on a create.
+      const sendsEmails = ops.some((op) => op.path!.toLowerCase().startsWith('emails'));
+      for (const op of ops) {
+        const path = op.path!.toLowerCase();
+        if (op.op === 'remove') {
+          // The only removable attribute is the deprovisioning flag; everything
+          // else is required for the account to be usable.
+          if (path !== 'active') {
+            throw new ScimError(400, `Attribute '${op.path}' cannot be removed`, 'invalidPath');
+          }
+          patch.active = false;
+          continue;
+        }
+        if (path === 'active') patch.active = asBoolean(op.value);
+        else if (path === 'externalid') patch.externalId = asString(op.value, 'externalId');
+        else if (!ACCOUNT_ATTRIBUTE.test(path)) {
+          throw new ScimError(400, `Attribute '${op.path}' is not writable`, 'invalidPath');
+        } else if (workspaceId === null && !(path === 'username' && sendsEmails)) {
+          const name = patch.name ?? (await requireUser(workspaceId, params.id)).name;
+          Object.assign(patch, accountOp(path, op.value, name));
+        }
+      }
+      const updated = await updateScimUser(workspaceId, params.id, patch);
+      return toScimUser(requireUpdated(updated, 'User', params.id));
+    },
+    {
+      params: resourceParams,
+      ...anyBody,
+      response: { 200: ScimUserResponse, ...scimErrors(400, 401, 404, 409) },
+      detail: { summary: 'Update a provisioned user' },
+    },
+  )
+
+  .delete(
+    '/Users/:id',
+    async ({ workspaceId, params }) => {
+      await deleteScimUser(workspaceId, params.id);
+      return noContent();
+    },
+    {
+      params: resourceParams,
+      response: { 204: t.Void(), ...scimErrors(401, 404, 409) },
+      detail: { summary: 'Delete a provisioned user' },
+    },
+  )
+
+  // ── Groups ──────────────────────────────────────────────────────────────────
+
+  .get(
+    '/Groups',
+    async ({ workspaceId, query }) => {
+      const page = requestedPage(query);
+      const { records, total } = await listScimGroups(workspaceId, {
+        filter: parseFilter(query.filter, GROUP_FILTER_ATTRIBUTES),
+        ...page,
+      });
+      return toListResponse(records.map(toScimGroup), total, page.startIndex);
+    },
+    {
+      query: listQuery,
+      response: { 200: ScimGroupListResponse, ...scimErrors(400, 401) },
+      detail: { summary: 'List provisioned groups' },
+    },
+  )
+
+  .post(
+    '/Groups',
+    async ({ workspaceId, body, set }) => {
+      const doc = asDoc(body);
+      const record = await createScimGroup(workspaceId, {
+        displayName: asString(doc.displayName, 'displayName'),
+        externalId: typeof doc.externalId === 'string' ? doc.externalId : null,
+        members: doc.members === undefined ? [] : memberIds(doc.members),
+      });
+      set.status = 201;
+      return toScimGroup(record);
+    },
+    {
+      ...anyBody,
+      response: { 201: ScimGroupResponse, ...scimErrors(400, 401, 409) },
+      detail: { summary: 'Provision a group' },
+    },
+  )
+
+  .get(
+    '/Groups/:id',
+    async ({ workspaceId, params }) => toScimGroup(await requireGroup(workspaceId, params.id)),
+    {
+      params: resourceParams,
+      response: { 200: ScimGroupResponse, ...scimErrors(401, 404) },
+      detail: { summary: 'Get one provisioned group' },
+    },
+  )
+
+  .put(
+    '/Groups/:id',
+    async ({ workspaceId, params, body }) => {
+      await requireGroup(workspaceId, params.id);
+      const doc = asDoc(body);
+      const updated = await updateScimGroup(workspaceId, params.id, {
+        displayName: asString(doc.displayName, 'displayName'),
+        externalId: typeof doc.externalId === 'string' ? doc.externalId : null,
+        members: doc.members === undefined ? [] : memberIds(doc.members),
+      });
+      return toScimGroup(requireUpdated(updated, 'Group', params.id));
+    },
+    {
+      params: resourceParams,
+      ...anyBody,
+      response: { 200: ScimGroupResponse, ...scimErrors(400, 401, 404, 409) },
+      detail: { summary: 'Replace a provisioned group' },
+    },
+  )
+
+  .patch(
+    '/Groups/:id',
+    async ({ workspaceId, params, body }) => {
+      const current = await requireGroup(workspaceId, params.id);
+      const patch: { displayName?: string; externalId?: string | null; members?: string[] } = {};
+      let members = new Set(current.members.map((member) => member.userId));
+      let membersChanged = false;
+      for (const op of parsePatch(body)) {
+        const path = op.path!.toLowerCase();
+        if (path.startsWith('members')) {
+          // A remove sent as a path filter (RFC 7644 §3.5.2.2, e.g. Okta) carries
+          // the id in the path itself, not in `value`.
+          const ids =
+            memberFilterIds(op.path!) ?? (op.value === undefined ? [] : memberIds(op.value));
+          if (op.op === 'remove') ids.forEach((id) => members.delete(id));
+          else if (op.op === 'add') ids.forEach((id) => members.add(id));
+          else members = new Set(ids);
+          membersChanged = true;
+          continue;
+        }
+        if (op.op === 'remove') {
+          throw new ScimError(400, `Attribute '${op.path}' cannot be removed`, 'invalidPath');
+        }
+        if (path === 'displayname') patch.displayName = asString(op.value, 'displayName');
+        else if (path === 'externalid') patch.externalId = asString(op.value, 'externalId');
+        else throw new ScimError(400, `Attribute '${op.path}' is not writable`, 'invalidPath');
+      }
+      if (membersChanged) patch.members = [...members];
+      const updated = await updateScimGroup(workspaceId, params.id, patch);
+      return toScimGroup(requireUpdated(updated, 'Group', params.id));
+    },
+    {
+      params: resourceParams,
+      ...anyBody,
+      response: { 200: ScimGroupResponse, ...scimErrors(400, 401, 404, 409) },
+      detail: { summary: 'Update a provisioned group' },
+    },
+  )
+
+  .delete(
+    '/Groups/:id',
+    async ({ workspaceId, params }) => {
+      if (!(await deleteScimGroup(workspaceId, params.id))) {
+        throw new ScimError(404, `Group '${params.id}' not found`);
+      }
+      return noContent();
+    },
+    {
+      params: resourceParams,
+      response: { 204: t.Void(), ...scimErrors(401, 404) },
+      detail: { summary: 'Delete a provisioned group' },
+    },
+  );
+
+// SCIM failures carry their own document, so this replaces the planner's `{ error }`
+// handler for these routes. Two things decide its shape:
+//
+//   - It wraps the routes from the outside rather than sitting on the same instance.
+//     An onError beside the routes widens the inferred response type of every one of
+//     them with the body it returns, which reaches the Eden client as a success shape.
+//   - Elysia propagates it to the root app, and from there over every route, so it
+//     answers only for its own paths and hands everything else back for the planner's
+//     handler to answer.
+export const scimRoutes = new Elysia({ name: 'scim' })
+  .onError({ as: 'global' }, ({ error, path, set }) => {
+    if (!path.startsWith(SCIM_PREFIX)) return;
+    set.headers['content-type'] = SCIM_CONTENT_TYPE;
+    if (error instanceof ScimError) {
+      set.status = error.status;
+      return scimErrorBody(error.status, error.message, error.scimType);
+    }
+    if (error instanceof HttpError) {
+      set.status = error.status;
+      return scimErrorBody(error.status, error.message);
+    }
+    console.error('[scim]', error);
+    set.status = 500;
+    return scimErrorBody(500, 'Internal error');
+  })
+  .use(scimHandlers);
+
+// The update returns null when the row is gone, which the read at the start of the
+// handler cannot rule out. Answering 404 keeps a provisioning client on a path it
+// understands instead of a 500.
+function requireUpdated<T>(record: T | null, resource: string, id: string): T {
+  if (!record) throw new ScimError(404, `${resource} '${id}' not found`);
+  return record;
+}
+
+async function requireUser(workspaceId: number | null, id: string) {
+  const record = await getScimUser(workspaceId, id);
+  if (!record) throw new ScimError(404, `User '${id}' not found`);
+  return record;
+}
+
+async function requireGroup(workspaceId: number | null, id: string) {
+  const record = await getScimGroup(workspaceId, id);
+  if (!record) throw new ScimError(404, `Group '${id}' not found`);
+  return record;
+}

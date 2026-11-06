@@ -1,0 +1,2 @@
+ALTER TABLE "team_member" ADD COLUMN "source" text DEFAULT 'invite' NOT NULL;--> statement-breakpoint
+ALTER TABLE "team_member" ADD CONSTRAINT "team_member_source_check" CHECK ("team_member"."source" IN ('invite', 'scim'));

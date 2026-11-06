@@ -1,0 +1,28 @@
+{
+  "name": "worker",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun --env-file=../../.env run --watch src/index.ts",
+    "start": "bun run src/index.ts",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test --env-file=../../.env.test"
+  },
+  "dependencies": {
+    "@repo/crypto": "workspace:*",
+    "@repo/db": "workspace:*",
+    "@repo/mailer": "workspace:*",
+    "@repo/net": "workspace:*",
+    "@repo/storage": "workspace:*",
+    "croner": "^10.0.1",
+    "drizzle-orm": "^0.45.4"
+  },
+  "devDependencies": {
+    "@repo/eslint-config": "workspace:*",
+    "@types/bun": "latest",
+    "eslint": "^9.39.0",
+    "typescript": "^6.0.3"
+  }
+}

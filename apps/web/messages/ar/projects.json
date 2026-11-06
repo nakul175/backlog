@@ -1,0 +1,29 @@
+{
+  "editAction": "تعديل المشروع",
+  "copyAction": "نسخ المشروع",
+  "deleteAction": "حذف المشروع",
+  "leaveAction": "مغادرة المشروع",
+  "archiveAction": "أرشفة المشروع",
+  "restoreAction": "استعادة المشروع",
+  "archived": "تمت أرشفة {name}",
+  "restored": "تمت استعادة {name}",
+  "deleteDialog": {
+    "title": "حذف {name}؟",
+    "confirm": "حذف نهائي",
+    "description": "ده هيحذف <strong>{name}</strong> وكل اللي فيه نهائي: المهام والتعليقات والمرفقات والإعدادات. مش هينفع ترجع فيه.",
+    "typeToConfirm": "اكتب <code>{key}</code> للتأكيد."
+  },
+  "leaveDialog": {
+    "title": "مغادرة {name}؟",
+    "confirm": "مغادرة المشروع",
+    "description": "هتفقد الوصول لـ <strong>{name}</strong> وعناصر العمل اللي فيه. عشان ترجع تاني هتحتاج دعوة جديدة من المالك."
+  },
+  "editDialog": {
+    "title": "تعديل المشروع",
+    "key": "المفتاح",
+    "keyHint": "تتطلب روابط المهام مفتاحًا من أحرف كبيرة وأرقام يبدأ بحرف. بعد حفظه، لا يمكن تغيير المفتاح.",
+    "name": "الاسم",
+    "description": "الوصف",
+    "submit": "حفظ"
+  }
+}

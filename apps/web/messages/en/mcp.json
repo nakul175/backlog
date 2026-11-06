@@ -1,0 +1,49 @@
+{
+  "title": "MCP Server",
+  "description": "Connect AI agents to this project over the Model Context Protocol. An agent sees what its API key allows.",
+  "disabled": "Disabled",
+  "offForTeam": "MCP is off for the team {team}.",
+  "offForProject": "The team {team} has MCP on, but this project is off.",
+  "openTeamSettings": "Open the team's MCP settings",
+  "askManager": "Ask a team owner or manager to turn it on:",
+  "keyHint": "Create a key on the <link>API keys</link> page, then replace <code>{apiKey}</code> in the snippet.",
+  "endpoint": "MCP endpoint",
+  "clientTabsAria": "Client",
+  "addToFile": "Add to <code>{file}</code>",
+  "notes": {
+    "claudeCode": "Run this in your terminal.",
+    "vscode": "Needs GitHub Copilot.",
+    "claudeDesktop": "Claude Desktop connects to remote servers through the mcp-remote bridge. Needs Node.js.",
+    "other": "Any client that supports MCP over Streamable HTTP works. Point it at the endpoint. Send an Authorization: Bearer {apiKey} header."
+  },
+  "clients": {
+    "other": "Other"
+  },
+  "oauth": {
+    "configuration": "How to connect",
+    "methodTabsAria": "Connection method",
+    "method": "OAuth",
+    "personalKey": "API key",
+    "description": "Use this for any MCP client that supports OAuth, such as ChatGPT or Claude. You sign in with your Itsaplan account. The client never receives an API key.",
+    "discovery": "OAuth discovery",
+    "steps": {
+      "add": "Add an MCP app in your client.",
+      "paste": "Paste the MCP endpoint.",
+      "choose": "Choose OAuth when the client asks how to sign in.",
+      "signIn": "Sign in to Itsaplan and approve access."
+    },
+    "security": "OAuth uses PKCE (S256), dynamic client registration, and access tokens scoped to your Itsaplan account.",
+    "consent": {
+      "title": "{client} wants to connect to your account",
+      "titleUnnamed": "An MCP client wants to connect to your account",
+      "description": "It will act with your permissions: whatever you can see and change, it can too.",
+      "account": "Signed in as {email}",
+      "redirect": "After you answer, you go back to {host}.",
+      "missingCode": "This authorization request is missing its consent code.",
+      "cancel": "Cancel",
+      "pending": "Authorizing…",
+      "authorize": "Authorize",
+      "failed": "Unable to complete OAuth authorization."
+    }
+  }
+}

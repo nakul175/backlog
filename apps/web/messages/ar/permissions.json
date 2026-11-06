@@ -1,0 +1,53 @@
+{
+  "none": "لم تُمنح أي صلاحيات",
+  "grantedCount": "{count, plural, zero {مفيش صلاحيات ممنوحة} one {صلاحية واحدة ممنوحة} two {صلاحيتين ممنوحين} few {# صلاحيات ممنوحة} many {# صلاحية ممنوحة} other {# صلاحية ممنوحة}}",
+  "resources": {
+    "work_items": "عناصر العمل (work items)",
+    "initiatives": "المبادرات (initiatives)",
+    "cycles": "الدورات (cycles)",
+    "dashboards": "لوحات المعلومات",
+    "documents": "المستندات",
+    "views": "عروض عناصر العمل",
+    "members_invite": "الدعوات",
+    "members_manage": "الأعضاء",
+    "states": "الحالات",
+    "issue_types": "أنواع المهام",
+    "labels": "الوسوم",
+    "ai_agents": "وكلاء الذكاء الاصطناعي (AI agents)",
+    "integrations": "التكاملات (integrations)",
+    "agent_skills": "مهارات الوكلاء (agent skills)",
+    "agent_tools": "أدوات الوكلاء (agent tools)",
+    "agent_usage": "استهلاك الوكلاء",
+    "custom_fields": "الحقول المخصّصة",
+    "issue_templates": "قوالب المهام",
+    "workflow_config": "تهيئة سير العمل",
+    "actions": "الإجراءات",
+    "webhooks": "خطافات الويب (webhooks)",
+    "repositories": "المستودعات",
+    "note_boards": "لوحات الملاحظات",
+    "import_export": "استيراد/تصدير",
+    "danger_zone": "منطقة الخطر"
+  },
+  "actions": {
+    "create": "إنشاء",
+    "edit": "تعديل",
+    "read": "قراءة",
+    "delete": "حذف"
+  },
+  "groups": {
+    "workItems": "عناصر العمل",
+    "dashboards": "لوحات المعلومات",
+    "documents": "المستندات",
+    "notes": "الملاحظات",
+    "ai": "الذكاء الاصطناعي",
+    "configuration": "التهيئة",
+    "members": "الأعضاء",
+    "project": "المشروع",
+    "other": "أخرى"
+  },
+  "resourceColumn": "المورد",
+  "allowed": "مسموح",
+  "notAllowed": "غير مسموح",
+  "accessHeading": "الوصول للمشروع ده",
+  "joined": "انضم في {date}"
+}

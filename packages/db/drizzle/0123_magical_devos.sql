@@ -1,0 +1,2 @@
+ALTER TABLE "agent_schedule" DROP CONSTRAINT "agent_schedule_agent_id_name_unique";--> statement-breakpoint
+ALTER TABLE "agent_schedule" ADD CONSTRAINT "agent_schedule_project_id_agent_id_name_unique" UNIQUE("project_id","agent_id","name");

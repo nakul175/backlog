@@ -1,0 +1,15 @@
+import type { Node } from '@tiptap/pm/model';
+import type { MarkdownStorage } from 'tiptap-markdown';
+
+// tiptap-markdown ships its storage type but never augments tiptap's Storage
+// interface, so `editor.storage.markdown` is untyped on a plain Editor (it is
+// only inferred where the extensions array is in scope). Declared here so any
+// holder of the editor instance can parse and serialize markdown.
+declare module '@tiptap/core' {
+  interface Storage {
+    markdown: MarkdownStorage & {
+      parser: { parse(markdown: string): string };
+      serializer: { serialize(node: Node): string };
+    };
+  }
+}

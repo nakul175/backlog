@@ -1,0 +1,14 @@
+{
+  "description": "Um rastreador de issues open-source e self-hosted com agentes de IA integrados. Atribua trabalho a pessoas ou agentes e conduza-o pela API, webhooks e MCP.",
+  "screens": {
+    "signIn": "Entrar",
+    "signUp": "Criar conta",
+    "forgotPassword": "Esqueci a senha",
+    "resetPassword": "Redefinir senha",
+    "account": "Conta",
+    "settings": "Configurações",
+    "teamSettings": "Configurações da equipe",
+    "invitation": "Convite",
+    "authorizeApp": "Autorizar aplicativo"
+  }
+}

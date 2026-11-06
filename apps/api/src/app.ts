@@ -1,0 +1,336 @@
+import {
+  auth,
+  oauthAuthorizationServerMetadata,
+  oauthProtectedResourceMetadata,
+  openIdConfiguration,
+  OIDC_PROVIDER_ID,
+  trustedOrigins,
+  getAuthSettings,
+  hasConfiguredGoogle,
+  hasConfiguredOidc,
+  getOidcLabel,
+} from '@repo/auth';
+import { db, hasConfiguredEmailProvider, user } from '@repo/db';
+import { cors } from '@elysiajs/cors';
+import { swagger } from '@elysiajs/swagger';
+import { Elysia } from 'elysia';
+import { planner } from './planner';
+import { mountMcp } from './mcp/mount';
+import { setMcpApp } from './mcp/app-ref';
+import { gitWebhookRoutes } from './modules/git/webhook';
+import { scimRoutes } from './modules/scim';
+import { currentUserRoutes } from './modules/current-user';
+import { syncOidcGroupsAfterCallback } from './modules/scim/oidc-sync';
+import { normalizeOpenApiResponse } from './openapi';
+import { requestTracking } from './shared/request-tracker';
+import pkg from '../../../package.json';
+
+const apiUrl = (process.env.API_URL ?? 'http://localhost:3000').replace(/\/+$/, '');
+const appUrl = (process.env.APP_URL?.split(',')[0]?.trim() || 'http://localhost:3001').replace(
+  /\/+$/,
+  '',
+);
+const apiDescription = `REST API for projects, work items, AI agents, Git integrations, analytics, and instance administration.
+
+## Quick start
+
+1. Create a personal API key in [Account settings](${appUrl}/account/api-keys). The key is shown once and carries the same permissions as its owner.
+2. Send it in the \`x-api-key\` header. Never put a key in a URL, issue, comment, or source file.
+3. In routes containing \`{projectKey}\`, name the project by its \`ref\`, \`<team>.<KEY>\` (e.g. \`acme.MKT\`). A bare key also works while only one of your teams has a project with it. This page is opened from a project, but the API document is instance-wide.
+
+\`\`\`sh
+curl "${apiUrl}/projects" \\
+  --header "x-api-key: YOUR_PERSONAL_API_KEY"
+\`\`\`
+
+JSON errors use \`{ "error": "message" }\` and may also include a stable \`code\`. Pagination parameters and response envelopes are documented per operation.
+
+For agent clients, use the MCP endpoint at [${apiUrl}/mcp](${apiUrl}/mcp). SCIM, worker-internal routes, and repository webhooks use the separate credentials shown on their operations.`;
+
+// better-auth serves the OIDC callback at /callback/oidc; identity providers keep the
+// redirect URI they were registered with, which is this path.
+const LEGACY_OIDC_CALLBACK = `/api/auth/oauth2/callback/${OIDC_PROVIDER_ID}`;
+const OIDC_CALLBACK = `/api/auth/callback/${OIDC_PROVIDER_ID}`;
+
+// The assembled Elysia app, without `.listen()`. `index.ts` imports this and
+// binds the port; tests import it and pass it to Eden Treaty to drive routes in
+// memory (no network). Keep the chain unbroken so `type App` stays accurate.
+export const app = new Elysia()
+  .use(
+    cors({
+      origin: trustedOrigins,
+      credentials: true,
+      methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+      allowedHeaders: ['Content-Type', 'Authorization', 'x-api-key'],
+    }),
+  )
+  // Before the routes: a hook applies only to the routes registered after it.
+  .use(requestTracking)
+  .onAfterHandle({ as: 'global' }, ({ request, response }) =>
+    normalizeOpenApiResponse(request, response),
+  )
+  // OpenAPI docs. Mounted on the main app (outside the planner's session guard)
+  // so the UI at /docs and the spec at /docs/json are reachable without a
+  // session. The spec is generated from the `t` schemas on every route.
+  .use(
+    swagger({
+      path: '/docs',
+      // Render with Scalar's own "default" theme to match the better-auth reference
+      // at /api/auth/reference. `customCss: ""` drops the gradient theme that
+      // @elysiajs/swagger injects by default (it falls back to elysiajsTheme only
+      // when customCss is null/undefined).
+      scalarConfig: {
+        theme: 'default',
+        customCss: '',
+      },
+      documentation: {
+        info: {
+          title: "It's a Plan API",
+          version: pkg.version,
+          description: apiDescription,
+        },
+        servers: [{ url: apiUrl, description: 'Configured public API origin' }],
+        tags: [
+          { name: 'Projects', description: 'Projects and the full work items view' },
+          { name: 'Teams', description: 'Teams that own projects' },
+          { name: 'Workspaces', description: 'Workspaces that own teams, and who manages them' },
+          { name: 'Members', description: 'Project membership and roles' },
+          { name: 'Roles', description: 'Project roles and their permissions' },
+          { name: 'Invites', description: 'Project invites (create, accept, reject)' },
+          { name: 'Columns', description: 'Work items columns and their order' },
+          { name: 'Issue Types', description: 'Per-project issue types' },
+          { name: 'Labels', description: 'Labels and label groups' },
+          { name: 'AI Agents', description: 'AI agents attached to a project' },
+          {
+            name: 'Integrations',
+            description: 'Stored integration credentials (LLM keys and tool creds)',
+          },
+          { name: 'Agent Skills', description: 'Skill library given to internal agents' },
+          {
+            name: 'Agent Runner',
+            description: "Run queue an external agent's runner drains with the agent's API key",
+          },
+          {
+            name: 'Agent Chat',
+            description: "Chat with an external agent: the member's messages and its runner's feed",
+          },
+          {
+            name: 'Agent Tools',
+            description: 'Tools configured on a credential and given to agents',
+          },
+          { name: 'Custom Fields', description: 'Global and type-scoped custom fields' },
+          { name: 'Issue Templates', description: 'Presets a new issue can be created from' },
+          { name: 'Issues', description: 'Issues, their fields, feed, and comments' },
+          {
+            name: 'Initiatives',
+            description: 'Initiatives (issue groupings) and their activity feed',
+          },
+          { name: 'Cycles', description: 'Cycles (time-boxed periods of work) and their issues' },
+          { name: 'Attachments', description: 'Issue attachments and raw bytes' },
+          {
+            name: 'Chat attachments',
+            description: 'Files uploaded in an agent chat and their raw bytes',
+          },
+          { name: 'Imports', description: 'Import drafts that turn an uploaded file into issues' },
+          {
+            name: 'Import/Export',
+            description:
+              'Background jobs that import issues from an external tracker (Plane), and a ' +
+              "project's own data exported as a portable JSON snapshot",
+          },
+          { name: 'Avatars', description: "Current user's avatar image (upload and raw bytes)" },
+          { name: 'Views', description: 'Saved work items views' },
+          { name: 'Share', description: 'Public read-only sharing of issues and views' },
+          { name: 'Actions', description: 'Project automation actions' },
+          { name: 'Webhooks', description: 'Outgoing webhook subscriptions' },
+          {
+            name: 'Git',
+            description:
+              'Repository integration: the inbound pull request webhook and its per-project settings',
+          },
+          { name: 'Agent Schedules', description: 'Recurring tasks for internal agents' },
+          { name: 'Model Prices', description: 'The prices a workspace costs model calls at' },
+          { name: 'Dashboards', description: 'Saved analytics dashboards' },
+          { name: 'Documents', description: 'Shared project Docs pages' },
+          { name: 'Link previews', description: 'Public web link metadata' },
+          { name: 'Note boards', description: 'Freeform canvases of sticky notes' },
+          { name: 'Notifications', description: "The session user's inbox notifications" },
+          { name: 'Sync', description: 'Change markers a client polls for live refresh' },
+          {
+            name: 'Telegram',
+            description: "The session user's linked Telegram account",
+          },
+          {
+            name: 'Analytics',
+            description: 'Project metrics: stats, pulse, throughput, breakdowns, activity',
+          },
+          { name: 'Charts', description: 'Chart specs an agent builds to show in a chat' },
+          {
+            name: 'Webhook test',
+            description: 'Test receiver for inspecting webhook deliveries (dev aid)',
+          },
+          {
+            name: 'God',
+            description:
+              'Instance administration: registration policy, email provider, sign-in providers, ' +
+              'SCIM provisioning',
+          },
+          {
+            name: 'SCIM',
+            description: 'SCIM 2.0 provisioning, authenticated with the instance SCIM bearer token',
+          },
+          {
+            name: 'System',
+            description: 'Liveness, the current session user, and the instance sign-in policy',
+          },
+        ],
+        // Planner routes are session-gated. Besides the session cookie (sent by the
+        // browser, not modelled here), a request may carry an `x-api-key` header:
+        // better-auth's apiKey plugin resolves it to the owner's session
+        // (enableSessionForAPIKeys). Declaring it here lets the Scalar UI at /docs
+        // authorize with a key and call the planner routes.
+        components: {
+          securitySchemes: {
+            apiKey: { type: 'apiKey', in: 'header', name: 'x-api-key' },
+            scimBearer: {
+              type: 'http',
+              scheme: 'bearer',
+              bearerFormat: 'opaque',
+              description: 'Instance SCIM token generated in God mode.',
+            },
+            gitHubSignature: {
+              type: 'apiKey',
+              in: 'header',
+              name: 'x-hub-signature-256',
+              description: 'GitHub HMAC signature generated from the raw request body.',
+            },
+            gitLabToken: {
+              type: 'apiKey',
+              in: 'header',
+              name: 'x-gitlab-token',
+              description: 'GitLab secret token configured on the project webhook.',
+            },
+            giteaSignature: {
+              type: 'apiKey',
+              in: 'header',
+              name: 'x-gitea-signature',
+              description: 'Gitea HMAC signature generated from the raw request body.',
+            },
+            forgejoSignature: {
+              type: 'apiKey',
+              in: 'header',
+              name: 'x-forgejo-signature',
+              description: 'Forgejo HMAC signature generated from the raw request body.',
+            },
+            bitbucketSignature: {
+              type: 'apiKey',
+              in: 'header',
+              name: 'x-hub-signature',
+              description: 'Bitbucket HMAC signature generated from the raw request body.',
+            },
+          },
+        },
+        security: [{ apiKey: [] }],
+      },
+    }),
+  )
+  // OAuth discovery lives at the API origin because MCP clients resolve the
+  // authorization server from protected-resource metadata before entering the
+  // Better Auth base path.
+  //
+  // An issuer with a path is looked up with the path after the well-known segment
+  // (RFC 8414 §3), and some clients fall back to OpenID discovery, so each document
+  // answers under any suffix; the proxy decides which of these paths reach the api.
+  .get('/.well-known/oauth-authorization-server', ({ request }) =>
+    oauthAuthorizationServerMetadata(request),
+  )
+  .get('/.well-known/oauth-authorization-server/*', ({ request }) =>
+    oauthAuthorizationServerMetadata(request),
+  )
+  .get('/.well-known/openid-configuration', ({ request }) => openIdConfiguration(request))
+  .get('/.well-known/openid-configuration/*', ({ request }) => openIdConfiguration(request))
+  .get('/.well-known/oauth-protected-resource', () => oauthProtectedResourceMetadata())
+  .get('/.well-known/oauth-protected-resource/*', () => oauthProtectedResourceMetadata())
+  // better-auth: forward every /api/auth/* request to its handler. The OIDC
+  // callback gets one extra step afterwards: folding the provider's `groups` claim
+  // into the SCIM group tables, so a group mapped to a project in god mode grants
+  // access on an OIDC-only instance too, not just one that also runs a SCIM sync.
+  .all('/api/auth/*', async ({ request }) => {
+    const url = new URL(request.url);
+    if (url.pathname === LEGACY_OIDC_CALLBACK) {
+      url.pathname = OIDC_CALLBACK;
+      request = new Request(url.href, request);
+    }
+    const response = await auth.handler(request);
+    if (url.pathname === OIDC_CALLBACK) await syncOidcGroupsAfterCallback(response);
+    return response;
+  })
+  .use(currentUserRoutes)
+  // What the sign-in and sign-up screens need before there is a session: whether
+  // registration is open, invite-only, or closed, and which sign-in methods are
+  // offered. Public on purpose — the screens are reached logged out. It carries no
+  // credentials, only the instance's own policy.
+  .get(
+    '/auth-config',
+    async () => {
+      const settings = await getAuthSettings();
+      const emailEnabled = await hasConfiguredEmailProvider();
+      return {
+        registration: settings.registration,
+        // Only usable when the instance can actually send mail.
+        magicLink: settings.magicLink && emailEnabled,
+        // Cleared together with the mail provider, so the raw setting is what the
+        // sign-up endpoint enforces.
+        requireEmailVerification: settings.requireEmailVerification,
+        emailEnabled,
+        // Whether the email/password form is offered at all. The api refuses to turn
+        // it off while no provider below is usable, so this is never false alone.
+        emailPassword: settings.emailPassword,
+        google: await hasConfiguredGoogle(),
+        oidc: await hasConfiguredOidc(),
+        // Names the operator's own identity provider, so the button shows it as
+        // given. Empty falls back to a translated default.
+        oidcLabel: await getOidcLabel(),
+        hasUsers: (await db.$count(user)) > 0,
+      };
+    },
+    {
+      detail: {
+        tags: ['System'],
+        summary: "Get the instance's sign-in configuration",
+        description:
+          'Report the registration policy and the sign-in methods the instance offers, so the ' +
+          'sign-in and sign-up screens can render before there is a session. Public.',
+      },
+    },
+  )
+  // Root doubles as the liveness/health endpoint.
+  .get('/', () => ({ name: "It's a Plan api", status: 'ok' }), {
+    detail: {
+      tags: ['System'],
+      summary: 'Check that the api is up',
+      description: 'Liveness probe: returns the api name and `status: "ok"`.',
+    },
+  })
+  // Inbound repository webhook receiver (authenticated by its per-project secret).
+  .use(gitWebhookRoutes)
+  // SCIM 2.0 provisioning (authenticated by the instance SCIM bearer token). Mounted
+  // here rather than under the planner: the planner's session guard would answer 401
+  // before the bearer check runs, and its error handler emits a body SCIM does not
+  // understand.
+  .use(scimRoutes)
+  // Planner API: projects, issues, and their dependent entities.
+  .use(planner);
+
+// MCP endpoint (/mcp). Added after the chain so `type App` (the Eden client
+// type) stays the REST surface; the MCP endpoint is JSON-RPC, not called via Eden.
+// Its tools are generated from the routes tagged with mcpTool().
+mountMcp(app);
+
+// Hands the assembled app to the internal agent runtime, which builds an agent's
+// tools from the same mcpTool() routes and dispatches them in process. It cannot
+// import this module without a cycle, so the reference is passed here.
+setMcpApp(app);
+
+// App type — useful for Eden Treaty (type-safe client) on the frontend and in tests.
+export type App = typeof app;

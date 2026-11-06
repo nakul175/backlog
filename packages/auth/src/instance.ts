@@ -1,0 +1,655 @@
+import { randomBytes, timingSafeEqual } from 'node:crypto';
+import {
+  db,
+  appSecret,
+  teamInvite,
+  getSetting,
+  setSetting,
+  readSecret,
+  writeSecret,
+  defaultInstanceEmailConfig,
+  getInstanceEmailConfig,
+  INSTANCE_EMAIL_SECRET_KEY,
+  type InstanceEmailConfig,
+} from '@repo/db';
+import { and, eq, gte, like, lt, sql } from 'drizzle-orm';
+import { hasEmailProvider, type SmtpAuth, type SmtpConfig } from '@repo/mailer';
+import type { GenericEndpointContext } from 'better-auth';
+
+// Authentication settings: who may register, whether email has to be confirmed,
+// which sign-in methods are offered, the mail provider used for authentication email,
+// and the credentials of the OAuth providers. Read by the better-auth instance in
+// ./index.ts (the registration gate, the mail senders, the Google and OIDC providers)
+// and written by the api, so it lives here rather than in the api.
+//
+// Non-secret settings are one jsonb blob in app_setting under the 'auth' key; the
+// credentials are encrypted in app_secret, each with a `redacted` mirror the settings
+// UI can read without decrypting. The instance's own are under 'auth.email',
+// 'auth.google', 'auth.oidc' and 'auth.scim', set in god mode; a workspace's SCIM, where
+// a build sets it up per workspace, is under 'workspace.<id>.scim'. The mail config is
+// also read by the api and the worker, so its shape and reader live in @repo/db; what
+// stays here is the write side.
+
+const AUTH_SETTING_KEY = 'auth';
+const GOOGLE_SECRET_KEY = 'auth.google';
+const OIDC_SECRET_KEY = 'auth.oidc';
+
+const scimSecretKey = (workspaceId: number | null) =>
+  workspaceId === null ? 'auth.scim' : `workspace.${workspaceId}.scim`;
+
+// Who may create an account.
+//   open   — anyone can sign up
+//   invite — only with the token of an unused, unexpired invite link
+//   closed — nobody; existing accounts still sign in
+export const REGISTRATION_MODES = ['open', 'invite', 'closed'] as const;
+export type RegistrationMode = (typeof REGISTRATION_MODES)[number];
+
+export interface AuthSettings {
+  registration: RegistrationMode;
+  // Require a confirmed email address before the account gets a session. Needs a
+  // mail provider: the api rejects turning it on while none is configured, and
+  // setEmailSettings clears it when the provider is removed.
+  requireEmailVerification: boolean;
+  // Offer sign-in by emailed link alongside the password.
+  magicLink: boolean;
+  // Offer the email/password form at all. Turning it off leaves single sign-on (and
+  // passkeys, which are added to an account that already exists) as the way in, so
+  // the api refuses to turn it off while no OAuth provider is configured.
+  emailPassword: boolean;
+  // Sign a person in through an OAuth provider into the existing account with the
+  // same address, whatever the provider says about that address and whether or not
+  // it was ever confirmed here. Off by default: an account nobody confirmed may have
+  // been registered with a password by someone other than the owner of the address,
+  // and trusting the provider hands it to whoever the provider says owns it.
+  trustProviderEmails: boolean;
+  // Give every person a workspace of their own: created with the account, and offered
+  // to an account that has none. Off, only the instance owner has a workspace.
+  personalWorkspaces: boolean;
+  // How many days an invite link stays valid, counted from when it was created. A
+  // pending invite older than this neither gates registration nor can be accepted.
+  // 0 disables the limit (invites never expire).
+  inviteTtlDays: number;
+  // The domains a new account's address must be at, lowercase. Empty admits any address.
+  // Accounts that already exist keep signing in.
+  allowedEmailDomains: string[];
+}
+
+function defaultAuthSettings(): AuthSettings {
+  return {
+    registration: 'open',
+    requireEmailVerification: false,
+    magicLink: false,
+    emailPassword: true,
+    trustProviderEmails: false,
+    personalWorkspaces: true,
+    inviteTtlDays: 7,
+    allowedEmailDomains: [],
+  };
+}
+
+// A subdomain is not admitted by its parent: listing company.com leaves eu.company.com out.
+export function emailDomainAllowed(email: string, domains: string[]): boolean {
+  if (domains.length === 0) return true;
+  const address = email.trim().toLowerCase();
+  return domains.includes(address.slice(address.lastIndexOf('@') + 1));
+}
+
+type RegistrationEmailPolicy = (email: string) => Promise<boolean>;
+
+const atInstanceDomains: RegistrationEmailPolicy = async (email) =>
+  emailDomainAllowed(email, (await getAuthSettings()).allowedEmailDomains);
+
+// Whether an address may create an account: by default, when it is at one of the
+// instance's allowed domains. A build that lets a workspace keep domains of its own can
+// also admit an address that workspace invited.
+let registrationEmailPolicy = atInstanceDomains;
+
+export function setRegistrationEmailPolicy(next = atInstanceDomains): void {
+  registrationEmailPolicy = next;
+}
+
+export function registrationEmailAllowed(email: string): Promise<boolean> {
+  return registrationEmailPolicy(email);
+}
+
+type RegistrationAdmission = (
+  email: string,
+  ctx: GenericEndpointContext | null,
+) => Promise<boolean>;
+
+const noAdmission: RegistrationAdmission = async () => false;
+
+// Whether an account goes past the registration gate whatever the instance's settings, by
+// the request creating it: a build that manages providers of its own can let one of them
+// create accounts on a closed instance, as SCIM does. It throws to turn the account away.
+let registrationAdmission = noAdmission;
+
+export function setRegistrationAdmission(next = noAdmission): void {
+  registrationAdmission = next;
+}
+
+export function admittedPastGate(
+  email: string,
+  ctx: GenericEndpointContext | null,
+): Promise<boolean> {
+  return registrationAdmission(email, ctx);
+}
+
+export async function getAuthSettings(): Promise<AuthSettings> {
+  const stored = await getSetting<Partial<AuthSettings>>(AUTH_SETTING_KEY);
+  // Merge over the default so a value written before a field was added stays valid.
+  return { ...defaultAuthSettings(), ...(stored ?? {}) };
+}
+
+// The cutoff an invite's createdAt must be at or after to still count, or null when
+// the instance has turned expiry off.
+export async function inviteValidSince(): Promise<Date | null> {
+  const days = (await getAuthSettings()).inviteTtlDays;
+  if (!days || days <= 0) return null;
+  return new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+}
+
+export async function setAuthSettings(patch: Partial<AuthSettings>): Promise<AuthSettings> {
+  const next = { ...(await getAuthSettings()), ...patch };
+  await setSetting(AUTH_SETTING_KEY, next);
+  return next;
+}
+
+// ── Encrypted config storage ──────────────────────────────────────────────────
+
+function mergeSecret(current: string, next: string | undefined): string {
+  return next && next.length > 0 ? next : current;
+}
+
+// ── Mail provider ─────────────────────────────────────────────────────────────
+
+// The config as returned to the client: every secret replaced by a boolean telling
+// whether a value is stored.
+export interface InstanceEmailDto {
+  smtp: {
+    enabled: boolean;
+    host: string;
+    port: number | null;
+    encryption: SmtpConfig['encryption'];
+    username: string;
+    hasPassword: boolean;
+    timeout: number | null;
+    auth: SmtpAuth;
+    oauth: { tenantId: string; clientId: string; hasClientSecret: boolean };
+  };
+  resend: { enabled: boolean; hasApiKey: boolean };
+  from: string;
+  allowProjects: boolean;
+}
+
+// A partial write. Each section, when present, replaces that section's non-secret
+// fields; a secret keeps its stored value when omitted or sent empty (a masked
+// field the user did not edit).
+export interface InstanceEmailPatch {
+  smtp?: {
+    enabled: boolean;
+    host: string;
+    port: number | null;
+    encryption: SmtpConfig['encryption'];
+    username: string;
+    password?: string;
+    timeout: number | null;
+    auth?: SmtpAuth;
+    oauth?: { tenantId: string; clientId: string; clientSecret?: string };
+  };
+  resend?: { enabled: boolean; apiKey?: string };
+  from?: string;
+  allowProjects?: boolean;
+}
+
+function toEmailDto(config: InstanceEmailConfig): InstanceEmailDto {
+  return {
+    smtp: {
+      enabled: config.smtp.enabled,
+      host: config.smtp.host,
+      port: config.smtp.port,
+      encryption: config.smtp.encryption,
+      username: config.smtp.username,
+      hasPassword: config.smtp.password.length > 0,
+      timeout: config.smtp.timeout,
+      auth: config.smtp.auth ?? 'password',
+      oauth: {
+        tenantId: config.smtp.oauth?.tenantId ?? '',
+        clientId: config.smtp.oauth?.clientId ?? '',
+        hasClientSecret: (config.smtp.oauth?.clientSecret ?? '').length > 0,
+      },
+    },
+    resend: { enabled: config.resend.enabled, hasApiKey: config.resend.apiKey.length > 0 },
+    from: config.from,
+    allowProjects: config.allowProjects,
+  };
+}
+
+export async function getEmailSettings(): Promise<InstanceEmailDto> {
+  return toEmailDto((await getInstanceEmailConfig()) ?? defaultInstanceEmailConfig());
+}
+
+function resolveSmtp(
+  current: SmtpConfig,
+  patch: NonNullable<InstanceEmailPatch['smtp']>,
+): SmtpConfig {
+  const { oauth, ...rest } = patch;
+  return {
+    ...rest,
+    password: mergeSecret(current.password, patch.password),
+    auth: patch.auth ?? current.auth ?? 'password',
+    oauth: oauth
+      ? {
+          tenantId: oauth.tenantId,
+          clientId: oauth.clientId,
+          clientSecret: mergeSecret(current.oauth?.clientSecret ?? '', oauth.clientSecret),
+        }
+      : current.oauth,
+  };
+}
+
+// Resolve a prospective configuration without persisting it. The email test route uses
+// this so an owner can validate edited values first, while omitted secrets still reuse
+// the encrypted value already on the instance.
+export async function resolveEmailConfig(
+  patch: InstanceEmailPatch = {},
+): Promise<InstanceEmailConfig> {
+  const current = (await getInstanceEmailConfig()) ?? defaultInstanceEmailConfig();
+  return {
+    smtp: patch.smtp ? resolveSmtp(current.smtp, patch.smtp) : current.smtp,
+    resend: patch.resend
+      ? {
+          enabled: patch.resend.enabled,
+          apiKey: mergeSecret(current.resend.apiKey, patch.resend.apiKey),
+        }
+      : current.resend,
+    from: patch.from ?? current.from,
+    allowProjects: patch.allowProjects ?? current.allowProjects,
+  };
+}
+
+export async function setEmailSettings(patch: InstanceEmailPatch): Promise<InstanceEmailDto> {
+  const next = await resolveEmailConfig(patch);
+  const redacted = toEmailDto(next);
+  await writeSecret(INSTANCE_EMAIL_SECRET_KEY, next, redacted);
+  // Without a provider no confirmation link can be sent, so the requirement goes
+  // with it rather than locking every new account out.
+  if (!hasEmailProvider(next) && (await getAuthSettings()).requireEmailVerification) {
+    await setAuthSettings({ requireEmailVerification: false });
+  }
+  return redacted;
+}
+
+// ── Google OAuth ──────────────────────────────────────────────────────────────
+
+// The stored, decrypted credentials. Read by the Google provider in ./index.ts on
+// every social request, never returned over HTTP.
+export interface InstanceGoogleConfig {
+  enabled: boolean;
+  clientId: string;
+  clientSecret: string;
+}
+
+// The config as returned to the client: the secret replaced by a boolean telling
+// whether a value is stored.
+export interface InstanceGoogleDto {
+  enabled: boolean;
+  clientId: string;
+  hasClientSecret: boolean;
+}
+
+// A partial write. The secret keeps its stored value when omitted or sent empty (a
+// masked field the user did not edit).
+export interface InstanceGooglePatch {
+  enabled?: boolean;
+  clientId?: string;
+  clientSecret?: string;
+}
+
+function defaultGoogleConfig(): InstanceGoogleConfig {
+  return { enabled: false, clientId: '', clientSecret: '' };
+}
+
+function toGoogleDto(config: InstanceGoogleConfig): InstanceGoogleDto {
+  return {
+    enabled: config.enabled,
+    clientId: config.clientId,
+    hasClientSecret: config.clientSecret.length > 0,
+  };
+}
+
+export async function getGoogleConfig(): Promise<InstanceGoogleConfig> {
+  const stored = await readSecret<InstanceGoogleConfig>(GOOGLE_SECRET_KEY);
+  // Merge over the default so a config written before a field was added stays valid.
+  return { ...defaultGoogleConfig(), ...(stored ?? {}) };
+}
+
+export async function getGoogleSettings(): Promise<InstanceGoogleDto> {
+  return toGoogleDto(await getGoogleConfig());
+}
+
+// Whether Google sign-in can run right now. The provider is always mounted, so this
+// is what both the god settings and the public sign-in screen ask before offering it.
+export function isGoogleUsable(config: InstanceGoogleConfig): boolean {
+  return config.enabled && config.clientId.length > 0 && config.clientSecret.length > 0;
+}
+
+export async function hasConfiguredGoogle(): Promise<boolean> {
+  return isGoogleUsable(await getGoogleConfig());
+}
+
+export async function setGoogleSettings(patch: InstanceGooglePatch): Promise<InstanceGoogleDto> {
+  const current = await getGoogleConfig();
+  const next: InstanceGoogleConfig = {
+    enabled: patch.enabled ?? current.enabled,
+    clientId: patch.clientId ?? current.clientId,
+    clientSecret: mergeSecret(current.clientSecret, patch.clientSecret),
+  };
+  const redacted = toGoogleDto(next);
+  await writeSecret(GOOGLE_SECRET_KEY, next, redacted);
+  return redacted;
+}
+
+// ── Generic OIDC / OAuth2 ─────────────────────────────────────────────────────
+
+// One OIDC provider per instance, discovered from its well-known document. The
+// stored, decrypted credentials; read by the provider in ./index.ts on every
+// request, never returned over HTTP.
+export interface InstanceOidcConfig {
+  enabled: boolean;
+  // Text of the sign-in button. Free-form because it names the operator's own
+  // identity provider, so the sign-in screen renders it as given rather than
+  // translating it. Empty falls back to a translated default.
+  label: string;
+  // The provider's .well-known/openid-configuration. The authorization, token and
+  // userinfo endpoints are read from it, so none of them is configured by hand.
+  discoveryUrl: string;
+  clientId: string;
+  clientSecret: string;
+  scopes: string[];
+  pkce: boolean;
+}
+
+// The config as returned to the client: the secret replaced by a boolean telling
+// whether a value is stored.
+export interface InstanceOidcDto {
+  enabled: boolean;
+  label: string;
+  discoveryUrl: string;
+  clientId: string;
+  hasClientSecret: boolean;
+  scopes: string[];
+  pkce: boolean;
+}
+
+// A partial write. The secret keeps its stored value when omitted or sent empty (a
+// masked field the user did not edit).
+export interface InstanceOidcPatch {
+  enabled?: boolean;
+  label?: string;
+  discoveryUrl?: string;
+  clientId?: string;
+  clientSecret?: string;
+  scopes?: string[];
+  pkce?: boolean;
+}
+
+function defaultOidcConfig(): InstanceOidcConfig {
+  return {
+    enabled: false,
+    label: '',
+    discoveryUrl: '',
+    clientId: '',
+    clientSecret: '',
+    scopes: ['openid', 'profile', 'email'],
+    pkce: true,
+  };
+}
+
+function toOidcDto(config: InstanceOidcConfig): InstanceOidcDto {
+  return {
+    enabled: config.enabled,
+    label: config.label,
+    discoveryUrl: config.discoveryUrl,
+    clientId: config.clientId,
+    hasClientSecret: config.clientSecret.length > 0,
+    scopes: config.scopes,
+    pkce: config.pkce,
+  };
+}
+
+export async function getOidcConfig(): Promise<InstanceOidcConfig> {
+  const stored = await readSecret<InstanceOidcConfig>(OIDC_SECRET_KEY);
+  // Merge over the default so a config written before a field was added stays valid.
+  return { ...defaultOidcConfig(), ...(stored ?? {}) };
+}
+
+export async function getOidcSettings(): Promise<InstanceOidcDto> {
+  return toOidcDto(await getOidcConfig());
+}
+
+// Whether OIDC sign-in can run right now. The provider is always mounted, so this is
+// what both the god settings and the public sign-in screen ask before offering it.
+export function isOidcUsable(config: InstanceOidcConfig): boolean {
+  return (
+    config.enabled &&
+    config.discoveryUrl.length > 0 &&
+    config.clientId.length > 0 &&
+    config.clientSecret.length > 0
+  );
+}
+
+export async function hasConfiguredOidc(): Promise<boolean> {
+  return isOidcUsable(await getOidcConfig());
+}
+
+// The button text the sign-in screen shows, or an empty string when OIDC is not
+// usable. Read by the public /auth-config.
+export async function getOidcLabel(): Promise<string> {
+  const config = await getOidcConfig();
+  return isOidcUsable(config) ? config.label : '';
+}
+
+export async function setOidcSettings(patch: InstanceOidcPatch): Promise<InstanceOidcDto> {
+  const current = await getOidcConfig();
+  const next: InstanceOidcConfig = {
+    enabled: patch.enabled ?? current.enabled,
+    label: patch.label ?? current.label,
+    discoveryUrl: patch.discoveryUrl ?? current.discoveryUrl,
+    clientId: patch.clientId ?? current.clientId,
+    clientSecret: mergeSecret(current.clientSecret, patch.clientSecret),
+    scopes: patch.scopes ?? current.scopes,
+    pkce: patch.pkce ?? current.pkce,
+  };
+  const redacted = toOidcDto(next);
+  await writeSecret(OIDC_SECRET_KEY, next, redacted);
+  return redacted;
+}
+
+// ── SCIM provisioning token ───────────────────────────────────────────────────
+
+// The bearer token an identity provider sends to /scim/v2: the instance's, set up in god
+// mode, and one per workspace where a build sets SCIM up per workspace. Every function
+// here takes the workspace, or null for the instance's. A token is generated here and
+// shown once: only its prefix is kept in the redacted mirror, so a lost token is
+// replaced rather than recovered.
+export interface ScimConfig {
+  enabled: boolean;
+  token: string;
+}
+
+export interface ScimSettingsDto {
+  enabled: boolean;
+  hasToken: boolean;
+  // First characters of the stored token, so the owner can tell which one an IdP
+  // is configured with.
+  tokenPrefix: string;
+}
+
+// The instance's provider is god's and acts on the whole instance: it sees and
+// deactivates every account, and a deactivated account cannot sign in. A hosted build
+// also lets every workspace owner set up a provider of their own, which decides who is
+// in their workspace, nothing more.
+let scimPerWorkspace = false;
+
+export function setWorkspaceScim(on = true): void {
+  scimPerWorkspace = on;
+}
+
+export function workspaceScim(): boolean {
+  return scimPerWorkspace;
+}
+
+// True for an account the instance's identity provider or god deactivated
+// (`user.active`). Such an account cannot sign in, and the api refuses the sessions and
+// keys it already holds.
+export function isAccountDeactivated(account: { active?: boolean | null }): boolean {
+  return account.active === false;
+}
+
+// Whether the instance's identity provider decides which accounts are active, so god
+// does not: its SCIM is on with a token, the condition under which verifyScimToken
+// opens /scim/v2 for it.
+export async function accountsManagedByScim(): Promise<boolean> {
+  const config = await getScimConfig(null);
+  return config.enabled && config.token.length > 0;
+}
+
+// The workspaces that set up SCIM of their own, read from the redacted mirror. Their own
+// provider decides who is in them, so the instance's groups grant nothing there.
+export async function workspacesWithOwnScim(): Promise<number[]> {
+  if (!scimPerWorkspace) return [];
+  const rows = await db
+    .select({ key: appSecret.key })
+    .from(appSecret)
+    .where(
+      and(
+        like(appSecret.key, 'workspace.%.scim'),
+        sql`${appSecret.redacted}->>'enabled' = 'true'`,
+        sql`${appSecret.redacted}->>'hasToken' = 'true'`,
+      ),
+    );
+  return rows.map((row) => Number(row.key.split('.')[1])).filter(Number.isInteger);
+}
+
+// A workspace's token reads scim_<workspaceId>_<secret>, so the workspace it opens is
+// found without trying the token of every workspace. The instance's reads
+// scim_<secret>, or carries the id of the workspace it belonged to before SCIM was the
+// instance's.
+const SCIM_TOKEN_PREFIX = 'scim_';
+const SCIM_TOKEN_WORKSPACE = /^scim_(\d+)_/;
+
+function defaultScimConfig(): ScimConfig {
+  return { enabled: false, token: '' };
+}
+
+function toScimDto(config: ScimConfig): ScimSettingsDto {
+  return {
+    enabled: config.enabled,
+    hasToken: config.token.length > 0,
+    // Everything up to the last '_', in both token formats, and six characters of
+    // the secret.
+    tokenPrefix: config.token.slice(0, config.token.lastIndexOf('_') + 1 + 6),
+  };
+}
+
+async function getScimConfig(workspaceId: number | null): Promise<ScimConfig> {
+  const stored = await readSecret<ScimConfig>(scimSecretKey(workspaceId));
+  return { ...defaultScimConfig(), ...(stored ?? {}) };
+}
+
+export async function getScimSettings(workspaceId: number | null): Promise<ScimSettingsDto> {
+  return toScimDto(await getScimConfig(workspaceId));
+}
+
+export async function setScimSettings(
+  workspaceId: number | null,
+  patch: { enabled?: boolean },
+): Promise<ScimSettingsDto> {
+  const current = await getScimConfig(workspaceId);
+  const next: ScimConfig = { ...current, enabled: patch.enabled ?? current.enabled };
+  const redacted = toScimDto(next);
+  await writeSecret(scimSecretKey(workspaceId), next, redacted);
+  return redacted;
+}
+
+// Mints a token, replacing any previous one, and returns it in the clear. This is
+// the only time the value leaves the server.
+export async function rotateScimToken(workspaceId: number | null): Promise<string> {
+  const current = await getScimConfig(workspaceId);
+  const scope = workspaceId === null ? '' : `${workspaceId}_`;
+  const token = `${SCIM_TOKEN_PREFIX}${scope}${randomBytes(24).toString('hex')}`;
+  const next: ScimConfig = { ...current, token };
+  await writeSecret(scimSecretKey(workspaceId), next, toScimDto(next));
+  return token;
+}
+
+// The comparison is constant-time, so a wrong token cannot be recovered by timing the
+// answer. Lengths are compared first because timingSafeEqual rejects buffers of
+// different sizes.
+async function tokenOpens(workspaceId: number | null, candidate: string): Promise<boolean> {
+  const config = await getScimConfig(workspaceId);
+  if (!config.enabled || config.token.length === 0) return false;
+  const expected = Buffer.from(config.token);
+  const given = Buffer.from(candidate);
+  return expected.length === given.length && timingSafeEqual(expected, given);
+}
+
+// The provider a token opens: the instance's (workspaceId null) or a workspace's, or
+// null when it opens none.
+export async function verifyScimToken(
+  candidate: string,
+): Promise<{ workspaceId: number | null } | null> {
+  if (await tokenOpens(null, candidate)) return { workspaceId: null };
+  const named = candidate.match(SCIM_TOKEN_WORKSPACE)?.[1];
+  if (!scimPerWorkspace || !named) return null;
+  const workspaceId = Number(named);
+  return (await tokenOpens(workspaceId, candidate)) ? { workspaceId } : null;
+}
+
+// ── Invites ───────────────────────────────────────────────────────────────────
+
+// True when this address has a pending, unexpired invite. That is what "invite only"
+// means on this instance: someone invites them to a team or to one of its projects, and
+// that invite is what lets them register at all. Invites are created and revoked inside
+// a team (team_invite), so there is nothing instance-level to manage.
+//
+// The invite itself is accepted after sign-up, on the /invite/:token screen — this
+// only decides whether the account may be created, and leaves the invite pending.
+export async function hasPendingInvite(email: string): Promise<boolean> {
+  const address = email.trim().toLowerCase();
+  if (!address) return false;
+  const since = await inviteValidSince();
+  const rows = await db
+    .select({ id: teamInvite.id })
+    .from(teamInvite)
+    .where(
+      and(
+        eq(teamInvite.email, address),
+        eq(teamInvite.status, 'pending'),
+        since ? gte(teamInvite.createdAt, since) : undefined,
+      ),
+    )
+    .limit(1);
+  return rows.length > 0;
+}
+
+// True when the address has a pending invite that has expired. Asked after
+// hasPendingInvite says no, so the person knows to ask for a new link.
+export async function hasExpiredInvite(email: string): Promise<boolean> {
+  const address = email.trim().toLowerCase();
+  const since = await inviteValidSince();
+  if (!address || !since) return false;
+  const rows = await db
+    .select({ id: teamInvite.id })
+    .from(teamInvite)
+    .where(
+      and(
+        eq(teamInvite.email, address),
+        eq(teamInvite.status, 'pending'),
+        lt(teamInvite.createdAt, since),
+      ),
+    )
+    .limit(1);
+  return rows.length > 0;
+}
