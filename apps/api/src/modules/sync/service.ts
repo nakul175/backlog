@@ -1,13 +1,14 @@
-import { db, project, projectMember, teamRole, revision } from '@repo/db';
+import { createHash } from 'node:crypto';
+import { db, project, projectMember, teamMember, teamRole, revision } from '@repo/db';
 import { and, eq, inArray, isNotNull, or } from 'drizzle-orm';
 import { toMemberContext, type MemberRole } from '#modules/members/service';
 import { workspaceGrants } from '#modules/workspaces/service';
 import { hasPermission, type PermissionResource } from '#shared/permissions';
-import { projectAccess } from '#shared/workspace-roles';
+import { projectAccess, teamAccess } from '#shared/workspace-roles';
+import type { TeamStanding } from '#modules/teams/service';
 
-// The revision engine's read side. The counters themselves are written by the
-// triggers in migration 0070 — no application code bumps them, so a write moves
-// the marker whichever process it came from.
+// Content counters come from migration 0070's triggers. Access markers below
+// reflect current authority even when another process changes membership.
 
 // A scope kind a client may ask for: the key it maps to in the revision table and
 // the resource the caller must be allowed to read to watch it. Project-wide and
@@ -19,6 +20,7 @@ export interface ScopeKind {
 }
 
 export const scopeKind: Record<string, ScopeKind> = {
+  access: { key: (projectId) => `access:${projectId}`, resource: null },
   board: { key: (projectId) => `board:${projectId}`, resource: 'work_items' },
   documents: { key: (projectId) => `documents:${projectId}`, resource: 'documents' },
   issue: { key: (issueId) => `issue:${issueId}`, resource: 'work_items' },
@@ -39,7 +41,7 @@ export interface ScopeRead {
   resource: PermissionResource | null;
 }
 
-// The markers a client is watching, in one query. A scope of a project the user neither
+// The markers a client is watching. A scope of a project the user neither
 // belongs to nor reaches through their workspace role returns no row and reads as
 // unchanged. A scope whose resource their access may not read is dropped the same way,
 // so it also reads as unchanged.
@@ -88,6 +90,43 @@ export async function readRevs(
       if (!access || !hasPermission(access.permissions, resource, 'read')) continue;
     }
     out[row.scope] = String(row.rev);
+  }
+  // Membership and role writes can come from the central portal without touching
+  // content revisions. Hash the current effective authority in the shared poll.
+  const accessIds = wanted
+    .filter((w) => w.key.startsWith('access:'))
+    .map((w) => Number(w.key.split(':')[1]));
+  if (accessIds.length > 0) {
+    const memberships = await db
+      .select({
+        id: project.id,
+        teamId: project.teamId,
+        role: projectMember.role,
+        permissions: teamRole.permissions,
+        teamStanding: teamMember.role,
+      })
+      .from(project)
+      .leftJoin(
+        projectMember,
+        and(eq(projectMember.projectId, project.id), eq(projectMember.userId, userId)),
+      )
+      .leftJoin(teamRole, eq(teamRole.id, projectMember.roleId))
+      .leftJoin(
+        teamMember,
+        and(eq(teamMember.teamId, project.teamId), eq(teamMember.userId, userId)),
+      )
+      .where(inArray(project.id, accessIds));
+    for (const row of memberships) {
+      const grant = grants.get(row.teamId) ?? null;
+      const member = row.role ? toMemberContext(row.role as MemberRole, row.permissions) : null;
+      const access = projectAccess(member, grant);
+      // Missing and inaccessible projects have the same marker; no role data leaks.
+      if (!access) continue;
+      const team = teamAccess(row.teamStanding as TeamStanding | null, grant);
+      out[`access:${row.id}`] = createHash('sha256')
+        .update(JSON.stringify({ ...access, teamRole: team?.role ?? null }))
+        .digest('hex');
+    }
   }
   return out;
 }
