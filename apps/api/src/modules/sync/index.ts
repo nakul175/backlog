@@ -11,7 +11,7 @@ const MAX_SCOPES = 20;
 // Live refresh: the change markers of everything one client is watching, in a
 // single request. A screen registers the scopes it depends on, the client polls
 // them together, and refetches its heavy queries only for the scopes that moved.
-// The markers themselves are written by database triggers (migration 0070).
+// Content markers come from database triggers; access markers reflect current roles.
 export const syncRoutes = new Elysia({ name: 'sync', detail: { tags: ['Sync'] } })
   .use(authContext)
 

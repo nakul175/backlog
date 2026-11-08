@@ -11,6 +11,9 @@ import { ApiError } from '@/lib/api/core/client';
 import { applyFilters } from '@/utils/filters';
 import { withoutShownSubtasks } from '@/utils/subtasks';
 import { viewPath } from '@/utils/paths';
+import { useLiveRefresh } from '@/hooks/useLiveRefresh';
+import { revScope } from '@/utils/revScopes';
+import { qk } from '@/services/queryKeys';
 import { useViewEditor } from '@/hooks/useViewEditor';
 
 function errorMessage(error: unknown): string | null {
@@ -32,7 +35,19 @@ export function useShellProject(projectKey: string | null, activeViewId: number 
   // child reads project.issues as before.
   const projectQuery = useProjectQuery(projectKey);
   const boardIssuesQuery = useBoardIssuesQuery(projectKey);
-  const scaffold = projectQuery.data ?? null;
+  // Keep watching the last known project after a denial so a regrant recovers
+  // this tab; never use that cached scaffold as current authority on an error.
+  useLiveRefresh({
+    scope: projectQuery.data ? revScope.access(projectQuery.data.project.id) : null,
+    targets: [
+      qk.project(projectKey ?? ''),
+      qk.projects,
+      qk.boardIssues(projectKey ?? ''),
+      qk.views(projectKey ?? ''),
+      qk.teams,
+    ],
+  });
+  const scaffold = projectQuery.isError ? null : (projectQuery.data ?? null);
   // The cycle options join the composite so grouping by cycle can lay out a lane
   // per cycle a board plans into, not only per cycle an issue is already in. The
   // whole list is not loaded: it grows with every finished cycle, and a finished
@@ -43,15 +58,21 @@ export function useShellProject(projectKey: string | null, activeViewId: number 
       scaffold
         ? {
             ...scaffold,
-            issues: boardIssuesQuery.data?.issues ?? [],
+            issues:
+              !boardIssuesQuery.isError && scaffold.permissions.work_items?.read
+                ? (boardIssuesQuery.data?.issues ?? [])
+                : [],
             plannedCycles: cyclesQuery.data ?? [],
           }
         : null,
-    [scaffold, boardIssuesQuery.data, cyclesQuery.data],
+    [scaffold, boardIssuesQuery.data, boardIssuesQuery.isError, cyclesQuery.data],
   );
 
   const viewsQuery = useViewsQuery(projectKey);
-  const views = useMemo(() => viewsQuery.data ?? [], [viewsQuery.data]);
+  const views = useMemo(
+    () => (scaffold?.permissions.views?.read && !viewsQuery.isError ? (viewsQuery.data ?? []) : []),
+    [scaffold, viewsQuery.data, viewsQuery.isError],
+  );
 
   // Saved-views, layout, display and filter editing for the current project. The
   // active view is the route param; selecting a view navigates.

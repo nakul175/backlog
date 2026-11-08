@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from 'bun:test';
 import { api, authedApi, type Api, createProject } from '#tests/helpers/app';
 import { signUpTestUser } from '#tests/helpers/auth';
 import { resetDb } from '#tests/helpers/db';
-import { createRole } from '#tests/helpers/roles';
+import { createRole, teamIdOf } from '#tests/helpers/roles';
 
 // GET /sync/rev is the one poll behind live refresh: it answers with the change
 // marker of every scope a client watches. The markers are written by database
@@ -98,6 +98,64 @@ describe('sync', () => {
       const scopes = Array.from({ length: 21 }, () => `board:${projectId}`).join(',');
       const res = await asOwner.sync.rev.get({ query: { scopes } });
       expect(res.status).toBe(400);
+    });
+  });
+
+  describe('effective access scope', () => {
+    it('tracks grant, downgrade, role edits, revoke and regrant with the same session', async () => {
+      const { asOwner, projectId } = await setup();
+      const member = await addMember(asOwner);
+      const scope = `access:${projectId}`;
+      const membership = asOwner.projects({ projectKey: 'MKT' }).members({ userId: member.userId });
+      const before = await rev(member.api, scope);
+      expect(before).not.toBe('0');
+      expect(await rev(member.api, scope)).toBe(before);
+
+      expect((await membership.patch({ role: 'owner' })).status).toBe(204);
+      const owner = await rev(member.api, scope);
+      expect(owner).not.toBe(before);
+      const role = (
+        await createRole(asOwner, 'MKT', {
+          name: 'Reader',
+          permissions: { work_items: { read: true } },
+        })
+      ).data!;
+      expect((await membership.patch({ role: 'member', roleId: role.id })).status).toBe(204);
+      const reader = await rev(member.api, scope);
+      expect(reader).not.toBe(owner);
+      expect((await member.api.projects({ projectKey: 'MKT' }).get()).data!.viewer.role).toBe(
+        'member',
+      );
+
+      expect(
+        (
+          await asOwner
+            .teams({ teamId: await teamIdOf(asOwner, 'MKT') })
+            .roles({ roleId: role.id })
+            .patch({ permissions: {} })
+        ).status,
+      ).toBe(200);
+      expect(await rev(member.api, scope)).not.toBe(reader);
+      expect((await membership.delete()).status).toBe(204);
+      expect(await rev(member.api, scope)).toBe('0');
+      expect((await member.api.projects({ projectKey: 'MKT' }).get()).status).toBe(403);
+      expect(
+        (
+          await asOwner.projects({ projectKey: 'MKT' }).members.post({
+            userId: member.userId,
+            role: 'member',
+            roleId: role.id,
+          })
+        ).status,
+      ).toBe(204);
+      expect(await rev(member.api, scope)).not.toBe('0');
+    });
+
+    it('does not distinguish an inaccessible project from a missing project', async () => {
+      const { projectId } = await setup();
+      const outsider = authedApi((await signUpTestUser()).cookie);
+      expect(await rev(outsider, `access:${projectId}`)).toBe('0');
+      expect(await rev(outsider, 'access:2147483647')).toBe('0');
     });
   });
 

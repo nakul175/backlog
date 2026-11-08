@@ -1,6 +1,7 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
+import { usePermissions } from '@/hooks/usePermissions';
 import type { ProjectDetail } from '@/lib/api/endpoints/projects';
 import { issuePath, projectPath } from '@/utils/paths';
 import type { useOverlays } from '@/hooks/useOverlays';
@@ -23,6 +24,7 @@ export default function ShellOverlays({
   overlays: ReturnType<typeof useOverlays>;
 }) {
   const router = useRouter();
+  const { can } = usePermissions(project);
 
   return (
     <>
@@ -37,14 +39,14 @@ export default function ShellOverlays({
         />
       )}
 
-      {projectKey && overlays.showNewInitiative && (
+      {projectKey && can('initiatives', 'create') && overlays.showNewInitiative && (
         <InitiativeDialog
           projectKey={projectKey}
           onClose={() => overlays.setShowNewInitiative(false)}
         />
       )}
 
-      {project && overlays.newIssueDefaults != null && (
+      {project && can('work_items', 'create') && overlays.newIssueDefaults != null && (
         <NewIssueModal
           project={project}
           defaults={overlays.newIssueDefaults}
@@ -53,7 +55,7 @@ export default function ShellOverlays({
         />
       )}
 
-      {project && overlays.openIssueId != null && (
+      {project && can('work_items', 'read') && overlays.openIssueId != null && (
         <IssueDetail
           project={project}
           issueId={overlays.openIssueId}
