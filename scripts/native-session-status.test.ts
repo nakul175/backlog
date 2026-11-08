@@ -81,3 +81,30 @@ test('network failures and non-success responses cannot authorize a session', as
   globalThis.fetch = (async () => new Response('{}', { status: 503 })) as unknown as typeof fetch;
   expect(await nativeSessionActive('native', new Date(1))).toBe(false);
 });
+
+test('new provisioned IDs require managed authority even while the legacy flag is off', async () => {
+  enable();
+  delete process.env.APLYD_NATIVE_LOGOUT_ENABLED;
+  const id = 'portal_btf_10000000-0000-4000-8000-000000000001';
+  respond({ active: true, managed: false, local_id: id, generation: null });
+  expect(await nativeSessionActive(id, new Date(1))).toBe(false);
+  respond({ active: true, managed: true, local_id: id, generation: 0 });
+  expect(await nativeSessionActive(id, new Date(1))).toBe(true);
+  delete process.env.APLYD_ACCOUNTS_CLIENT_SECRET;
+  expect(await nativeSessionActive(id, new Date(1))).toBe(false);
+});
+test('loopback is explicit non-production only, with an exact BTF client', async () => {
+  enable();
+  process.env.APLYD_ACCOUNTS_ISSUER = 'http://127.0.0.1:49000';
+  process.env.APLYD_ACCOUNTS_CLIENT_ID = 'backlog-staging';
+  respond({ active: true, managed: true, local_id: 'native', generation: 0 });
+  expect(await nativeSessionActive('native', new Date(1))).toBe(false);
+  process.env.NODE_ENV = 'test';
+  process.env.APLYD_NATIVE_LOGOUT_LOOPBACK_TEST = 'true';
+  expect(await nativeSessionActive('native', new Date(1))).toBe(true);
+  process.env.NODE_ENV = 'production';
+  expect(await nativeSessionActive('native', new Date(1))).toBe(false);
+  process.env.NODE_ENV = 'test';
+  process.env.APLYD_ACCOUNTS_CLIENT_ID = 'other';
+  expect(await nativeSessionActive('native', new Date(1))).toBe(false);
+});
