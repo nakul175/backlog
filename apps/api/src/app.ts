@@ -85,7 +85,7 @@ export const app = new Elysia()
       },
       documentation: {
         info: {
-          title: "It's a Plan API",
+          title: 'Backlog API',
           version: pkg.version,
           description: apiDescription,
         },
@@ -305,7 +305,7 @@ export const app = new Elysia()
     },
   )
   // Root doubles as the liveness/health endpoint.
-  .get('/', () => ({ name: "It's a Plan api", status: 'ok' }), {
+  .get('/', () => ({ name: 'Backlog api', status: 'ok' }), {
     detail: {
       tags: ['System'],
       summary: 'Check that the api is up',

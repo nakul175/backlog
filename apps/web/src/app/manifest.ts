@@ -1,4 +1,5 @@
 import type { MetadataRoute } from 'next';
+import { APP_BRAND, APP_NAME } from '@/utils/app';
 
 // Makes the app installable: Add to Dock in Safari, Install in Chrome and Edge,
 // Add to Home Screen on a phone. The colours are the light theme's `--background`;
@@ -6,8 +7,8 @@ import type { MetadataRoute } from 'next';
 // which also covers the dark theme.
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: 'Backlog to the Future',
-    short_name: 'Backlog to the Future',
+    name: APP_BRAND,
+    short_name: APP_NAME,
     start_url: '/',
     scope: '/',
     display: 'standalone',
