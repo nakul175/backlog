@@ -1,5 +1,4 @@
 import { afterEach, expect, test } from 'bun:test';
-import type { drizzleAdapter } from 'better-auth/adapters/drizzle';
 import { withNativeLogout } from '../packages/auth/src/native-session-adapter';
 const environment = { ...process.env };
 const fetchBefore = globalThis.fetch;
@@ -12,7 +11,7 @@ function adapter(projected: boolean, id: string) {
   const full = { id: 'session', userId: id, createdAt: new Date(1) };
   const factory = (() => ({
     findOne: async (q: { select?: string[] }) => (q.select ? { id: 'session' } : full),
-  })) as unknown as ReturnType<typeof drizzleAdapter>;
+  })) as unknown as Parameters<typeof withNativeLogout>[0];
   return {
     instance: withNativeLogout(factory)({}),
     query: {
