@@ -28,4 +28,4 @@ jobs:
         with:
           bun-version: 1.4.3
       - run: bun install --frozen-lockfile
-      - run: bun test scripts/exact-oidc.test.ts packages/db/tests/exact-oidc-postgres.test.ts
+      - run: bun test scripts/exact-oidc.test.ts scripts/native-session-status.test.ts scripts/native-provisioned-session-adapter.test.ts packages/db/tests/exact-oidc-postgres.test.ts

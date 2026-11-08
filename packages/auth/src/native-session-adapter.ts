@@ -1,5 +1,5 @@
 import type { drizzleAdapter } from 'better-auth/adapters/drizzle';
-import { nativeLogoutEnabled, nativeSessionActive } from './native-session-status';
+import { nativeEnforcementRequired, nativeSessionActive } from './native-session-status';
 
 export function withNativeLogout(
   factory: ReturnType<typeof drizzleAdapter>,
@@ -10,7 +10,7 @@ export function withNativeLogout(
       ...adapter,
       async findOne<T>(query: Parameters<typeof adapter.findOne>[0]): Promise<T | null> {
         const result = await adapter.findOne<T>(query);
-        if (!result || query.model !== 'session' || !nativeLogoutEnabled()) return result;
+        if (!result || query.model !== 'session') return result;
         // A projected result cannot prove the original session's identity or birth time.
         const session = query.select
           ? await adapter.findOne<{ userId: string; createdAt: Date }>({
@@ -18,8 +18,9 @@ export function withNativeLogout(
               select: undefined,
             })
           : (result as { userId?: unknown; createdAt?: unknown });
-        if (!session || typeof session.userId !== 'string' || !(session.createdAt instanceof Date))
-          return null;
+        if (!session || typeof session.userId !== 'string') return null;
+        if (!nativeEnforcementRequired(session.userId)) return result;
+        if (!(session.createdAt instanceof Date)) return null;
         return (await nativeSessionActive(session.userId, session.createdAt)) ? result : null;
       },
     };
