@@ -14,9 +14,20 @@ export function dispositionReady(disposition: SubtaskDisposition | null): boolea
 // render it under and it would otherwise disappear.
 export function withoutShownSubtasks<T extends { id: number; parentId: number | null }>(
   issues: T[],
+  allIssues: T[] = issues,
 ): T[] {
   const shown = new Set(issues.map((issue) => issue.id));
-  return issues.filter((issue) => issue.parentId === null || !shown.has(issue.parentId));
+  const byId = new Map(allIssues.map((issue) => [issue.id, issue]));
+  return issues.filter((issue) => {
+    let parentId = issue.parentId;
+    const visited = new Set([issue.id]);
+    while (parentId !== null && !visited.has(parentId)) {
+      if (shown.has(parentId)) return false;
+      visited.add(parentId);
+      parentId = byId.get(parentId)?.parentId ?? null;
+    }
+    return true;
+  });
 }
 
 // How many subtasks the given issues have, read off the board payload. The delete
@@ -46,4 +57,23 @@ export function subtaskProgress(
     if (stateType === 'completed') done++;
   }
   return { done, total };
+}
+
+export function flattenDescendants<T extends { id: number }>(
+  issueId: number,
+  byParent: Map<number, T[]>,
+): (T & { nestingDepth: number })[] {
+  const result: (T & { nestingDepth: number })[] = [];
+  const visited = new Set([issueId]);
+  const stack = (byParent.get(issueId) ?? []).map((issue) => ({ issue, depth: 1 })).reverse();
+  while (stack.length) {
+    const { issue, depth } = stack.pop()!;
+    if (visited.has(issue.id)) continue;
+    visited.add(issue.id);
+    result.push({ ...issue, nestingDepth: depth });
+    for (const child of [...(byParent.get(issue.id) ?? [])].reverse()) {
+      stack.push({ issue: child, depth: depth + 1 });
+    }
+  }
+  return result;
 }

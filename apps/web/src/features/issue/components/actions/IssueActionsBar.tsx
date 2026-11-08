@@ -31,6 +31,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import ShareDialog from '@/components/common/share/ShareDialog';
 import MoveIssueDialog from './MoveIssueDialog';
 import { useTranslations } from 'next-intl';
+import { runtimeEnv } from '@/utils/runtimeEnv';
 
 // The issue detail Actions: the manual actions whose condition matches this
 // issue, plus Copy Prompt and a delete button. Owns the delete/apply
@@ -150,7 +151,7 @@ export default function IssueActionsBar({
         </TooltipTrigger>
         <TooltipContent>{copied ? t('copied') : t('copyPrompt')}</TooltipContent>
       </Tooltip>
-      {canEdit && (
+      {canEdit && !runtimeEnv().limitedFeatures && (
         <Tooltip>
           <TooltipTrigger asChild>
             <Button

@@ -3,7 +3,7 @@ import { useTranslations } from 'next-intl';
 import { issueColor, type Maps } from '@/utils/project';
 import { cn } from '@/lib/utils';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { useIssueSubtaskFold, useSubtasks } from '../../context/useSubtasks';
+import { useIssueSubtaskFold, useDescendants } from '../../context/useSubtasks';
 import { effSpan, LINK_ROW_H } from '../../utils/timeline';
 
 // The issue's subtasks as sub-rows under its timeline row: each subtask named on
@@ -36,7 +36,7 @@ export function TimelineSubtaskRows({
   onOpen: (id: number) => void;
 }) {
   const t = useTranslations('workItems.timeline');
-  const subtasks = useSubtasks(issueId);
+  const subtasks = useDescendants(issueId);
   const { open } = useIssueSubtaskFold();
   if (!open) return null;
 
@@ -63,7 +63,10 @@ export function TimelineSubtaskRows({
                 'sticky left-0 z-10 flex shrink-0 cursor-pointer items-center gap-2 overflow-hidden border-r bg-background pr-3 text-xs text-muted-foreground',
                 indented ? 'pl-10' : 'pl-6',
               )}
-              style={{ width: labelW }}
+              style={{
+                width: labelW,
+                paddingInlineStart: (indented ? 40 : 24) + (subtask.nestingDepth - 1) * 16,
+              }}
               onClick={(e) => {
                 e.preventDefault();
                 onOpen(subtask.id);

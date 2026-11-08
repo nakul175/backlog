@@ -105,6 +105,8 @@ describe('move issue', () => {
     const parent = (await createIssue(asOwner, mktColumns[0].id, 'Parent')).data!;
     const a = (await createIssue(asOwner, mktColumns[0].id, 'A', parent.id)).data!;
     const b = (await createIssue(asOwner, mktColumns[0].id, 'B', parent.id)).data!;
+    const third = (await createIssue(asOwner, mktColumns[0].id, 'Third', a.id)).data!;
+    const fourth = (await createIssue(asOwner, mktColumns[0].id, 'Fourth', third.id)).data!;
 
     await asOwner.issues({ issueId: b.id }).move.post({ projectId: ops.id });
     expect((await read(asOwner, b.id)).parentId).toBeNull();
@@ -112,6 +114,8 @@ describe('move issue', () => {
     await asOwner.issues({ issueId: parent.id }).move.post({ projectId: ops.id });
     const moved = await read(asOwner, a.id);
     expect(moved).toMatchObject({ projectId: ops.id, parentId: parent.id });
+    expect(await read(asOwner, third.id)).toMatchObject({ projectId: ops.id, parentId: a.id });
+    expect(await read(asOwner, fourth.id)).toMatchObject({ projectId: ops.id, parentId: third.id });
     expect((await read(asOwner, parent.id)).subtasks.map((s) => s.id)).toEqual([a.id]);
   });
 

@@ -1,6 +1,7 @@
 'use client';
 
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { flattenDescendants } from '@/utils/subtasks';
 import type { Issue } from '@/lib/api/endpoints/issues';
 
 // A subtask never shows as a card or a row of its own: it is rendered under its
@@ -97,7 +98,7 @@ export function useIssueSubtaskFold(): SubtaskFold {
   return useContext(FoldContext);
 }
 
-// The issue's subtasks, by issue number. Empty for a subtask, which has none.
+// Immediate children, by issue number.
 export function useSubtasks(issueId: number): Issue[] {
   return useContext(SubtaskContext).get(issueId) ?? NONE;
 }
@@ -107,4 +108,9 @@ export function useSubtasks(issueId: number): Issue[] {
 export function useParentIssue(parentId: number | null): Issue | undefined {
   const byId = useContext(IssueContext);
   return parentId === null ? undefined : byId.get(parentId);
+}
+
+export function useDescendants(issueId: number): (Issue & { nestingDepth: number })[] {
+  const byParent = useContext(SubtaskContext);
+  return useMemo(() => flattenDescendants(issueId, byParent), [issueId, byParent]);
 }

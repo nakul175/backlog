@@ -1,4 +1,5 @@
 import type { MetadataRoute } from 'next';
+import { APP_BRAND, APP_NAME } from '@/utils/app';
 
 // Makes the app installable: Add to Dock in Safari, Install in Chrome and Edge,
 // Add to Home Screen on a phone. The colours are the light theme's `--background`;
@@ -6,17 +7,13 @@ import type { MetadataRoute } from 'next';
 // which also covers the dark theme.
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: "It's a Plan",
-    short_name: "It's a Plan",
+    name: APP_BRAND,
+    short_name: APP_NAME,
     start_url: '/',
     scope: '/',
     display: 'standalone',
     background_color: '#fafafa',
     theme_color: '#fafafa',
-    icons: [
-      { src: '/icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
-      { src: '/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
-      { src: '/icon-maskable-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
-    ],
+    icons: [{ src: '/brand/mascot.png', sizes: '1280x1280', type: 'image/png', purpose: 'any' }],
   };
 }

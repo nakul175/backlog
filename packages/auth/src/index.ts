@@ -28,6 +28,8 @@ import {
 } from './instance';
 import { sendAuthEmail } from './mail';
 import { readAuthExtensions } from './extensions';
+import { withNativeLogout } from './native-session-adapter';
+import { nativeLogoutEnabled, nativeSessionActive } from './native-session-status';
 
 // Frontend origins allowed to call the auth handler. Mandatory config: cookies, the
 // WebAuthn relying party and the cookie domain are all derived from it, so a deploy
@@ -205,10 +207,15 @@ export async function verifyMcpAccessToken(token: string): Promise<string | null
   if (!(await isClientConnected(claims.sub, claims.client_id))) return null;
   if (typeof claims.sid === 'string') {
     const [open] = await db
-      .select({ n: sql`1` })
+      .select({ userId: schema.session.userId, createdAt: schema.session.createdAt })
       .from(schema.session)
       .where(and(eq(schema.session.id, claims.sid), gt(schema.session.expiresAt, new Date())));
     if (!open) return null;
+    if (
+      nativeLogoutEnabled() &&
+      (open.userId !== claims.sub || !(await nativeSessionActive(open.userId, open.createdAt)))
+    )
+      return null;
   }
   return claims.sub;
 }
@@ -551,26 +558,28 @@ function createAuth() {
     secret: process.env.BETTER_AUTH_SECRET,
     onAPIError: { errorURL: oauthErrorURL },
 
-    database: drizzleAdapter(db, {
-      provider: 'pg',
-      schema: {
-        user: schema.user,
-        session: schema.session,
-        account: schema.account,
-        verification: schema.verification,
-        passkey: schema.passkey,
-        apikey: schema.apikey,
-        jwks: schema.jwks,
-        oauthClient: schema.oauthClient,
-        oauthResource: schema.oauthResource,
-        oauthClientResource: schema.oauthClientResource,
-        oauthRefreshToken: schema.oauthRefreshToken,
-        oauthAccessToken: schema.oauthAccessToken,
-        oauthConsent: schema.oauthConsent,
-        oauthClientAssertion: schema.oauthClientAssertion,
-        ...extensions.schema,
-      },
-    }),
+    database: withNativeLogout(
+      drizzleAdapter(db, {
+        provider: 'pg',
+        schema: {
+          user: schema.user,
+          session: schema.session,
+          account: schema.account,
+          verification: schema.verification,
+          passkey: schema.passkey,
+          apikey: schema.apikey,
+          jwks: schema.jwks,
+          oauthClient: schema.oauthClient,
+          oauthResource: schema.oauthResource,
+          oauthClientResource: schema.oauthClientResource,
+          oauthRefreshToken: schema.oauthRefreshToken,
+          oauthAccessToken: schema.oauthAccessToken,
+          oauthConsent: schema.oauthConsent,
+          oauthClientAssertion: schema.oauthClientAssertion,
+          ...extensions.schema,
+        },
+      }),
+    ),
 
     emailAndPassword: {
       enabled: true,
@@ -847,7 +856,7 @@ function createAuth() {
       // then used to sign in (signIn.passkey). Adds the `passkey` table.
       passkey({
         rpID: passkeyRpID,
-        rpName: process.env.PASSKEY_RP_NAME ?? "It's a Plan",
+        rpName: process.env.PASSKEY_RP_NAME ?? 'Backlog by aplyd',
         // Expected origin(s) of the WebAuthn ceremony — the frontend origins.
         origin: trustedOrigins,
       }),

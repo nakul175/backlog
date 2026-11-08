@@ -1,5 +1,6 @@
 import {
   db,
+  type DbExecutor,
   project as projectTable,
   issue,
   issueStatus,
@@ -107,8 +108,7 @@ export interface IssueRow {
   assigneeUserId: string | null;
   delegateUserId: string | null;
   columnId: number;
-  // The issue this one is a subtask of, or null when it stands on its own. One
-  // level deep: an issue with a parent cannot itself have subtasks.
+  // The immediate parent in the project hierarchy, or null for a root issue.
   parentId: number | null;
   title: string;
   description: string;
@@ -798,40 +798,28 @@ async function assertIssueType(
   if (rows.length === 0) throw new HttpError(400, 'Issue type must belong to this project');
 }
 
-// Enforces the rules a parent link has to hold: both issues in the same project,
-// no issue its own parent, and one level of nesting — the parent may not be a
-// subtask itself, and an issue that already has subtasks may not become one.
-// issueId is null when the issue is being created (it has no subtasks yet).
-// Throws 400 otherwise; clearing the parent is always allowed.
 async function assertParent(
   projectId: number,
   issueId: number | null,
   parentId: number | null | undefined,
+  executor: DbExecutor = db,
 ): Promise<void> {
   if (parentId == null) return;
   await assertProjectFeature(projectId, 'subtasks');
-  if (parentId === issueId) throw new HttpError(400, 'An issue cannot be its own parent');
-  const rows = await db
-    .select({ projectId: issue.projectId, parentId: issue.parentId })
-    .from(issue)
-    .where(eq(issue.id, parentId));
-  if (rows.length === 0 || rows[0].projectId !== projectId)
-    throw new HttpError(400, 'Parent must belong to this project');
-  if (rows[0].parentId !== null)
-    throw new HttpError(400, 'A subtask cannot be the parent of another issue');
-  if (issueId !== null && (await hasSubtasks(issueId)))
-    throw new HttpError(400, 'An issue with subtasks cannot become a subtask');
-}
-
-// Whether the issue has subtasks, archived ones included: they stay attached to it
-// and are restored as subtasks.
-async function hasSubtasks(issueId: number): Promise<boolean> {
-  const rows = await db
-    .select({ id: issue.id })
-    .from(issue)
-    .where(eq(issue.parentId, issueId))
-    .limit(1);
-  return rows.length > 0;
+  const visited = new Set<number>();
+  if (issueId !== null) visited.add(issueId);
+  let current: number | null = parentId;
+  while (current !== null) {
+    if (visited.has(current)) throw new HttpError(400, 'A parent link cannot create a cycle');
+    visited.add(current);
+    const [parent]: { projectId: number; parentId: number | null }[] = await executor
+      .select({ projectId: issue.projectId, parentId: issue.parentId })
+      .from(issue)
+      .where(eq(issue.id, current));
+    if (!parent || parent.projectId !== projectId)
+      throw new HttpError(400, 'Parent must belong to this project');
+    current = parent.parentId;
+  }
 }
 
 // Enforces that every label belongs to the issue's project — the issue_label
@@ -867,7 +855,6 @@ export async function createIssue(
   await assertColumn(project.id, input.columnId);
   await assertWipLimit(input.columnId);
   await assertIssueType(project.id, input.typeId);
-  await assertParent(project.id, null, input.parentId);
   assertDateOrder(input.startDate, input.dueDate);
   // Also checked by setIssueLabels below, but here it fails before the issue exists.
   await assertIssueLabels(project.id, input.labelIds);
@@ -875,6 +862,8 @@ export async function createIssue(
   // column's auto-assignee applies. An assignee sent with the create wins over it.
   const assigneeUserId = input.assigneeUserId ?? (await columnAutoAssignee(input.columnId));
   const { id: issueId, createdAt } = await db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(7319, ${project.id})`);
+    await assertParent(project.id, null, input.parentId, tx);
     const [seqRow] = await tx
       .update(projectTable)
       .set({ nextSequence: sql`next_sequence + 1` })
@@ -1054,7 +1043,6 @@ export async function updateIssue(
     if (breach) return getIssue(id);
   }
   await assertIssueType(before.projectId, patch.typeId);
-  await assertParent(before.projectId, id, patch.parentId);
 
   // An assignee sent with the same move wins over the column's auto-assignee.
   const autoAssignee =
@@ -1088,7 +1076,22 @@ export async function updateIssue(
       opts?.onlyIfColumnId == null
         ? eq(issue.id, id)
         : and(eq(issue.id, id), eq(issue.columnId, opts.onlyIfColumnId));
-    const updated = await db.update(issue).set(set).where(guard).returning({ id: issue.id });
+    const write = (executor: DbExecutor) =>
+      executor.update(issue).set(set).where(guard).returning({ id: issue.id });
+    const updated =
+      patch.parentId === undefined
+        ? await write(db)
+        : await db.transaction(async (tx) => {
+            await tx.execute(sql`SELECT pg_advisory_xact_lock(7319, ${before.projectId})`);
+            const [current] = await tx
+              .select({ projectId: issue.projectId })
+              .from(issue)
+              .where(eq(issue.id, id));
+            if (current?.projectId !== before.projectId)
+              throw new HttpError(409, 'The issue moved; try again');
+            await assertParent(before.projectId, id, patch.parentId, tx);
+            return write(tx);
+          });
     if (updated.length === 0) return getIssue(id);
   }
   const after = await getIssue(id);

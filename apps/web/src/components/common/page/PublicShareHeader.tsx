@@ -1,5 +1,5 @@
 import ItsAPlanMark from '@/components/brand/ItsAPlanMark';
-import { APP_NAME, APP_SITE_URL } from '@/utils/app';
+import { APP_NAME } from '@/utils/app';
 
 // The header over a public shared page (a board or an issue). It shows the project
 // name, the ticker, and an optional trailing label. On a board that label is the
@@ -29,7 +29,7 @@ export default function PublicShareHeader({
         )}
       </div>
       <a
-        href={APP_SITE_URL}
+        href="/"
         target="_blank"
         rel="noreferrer"
         className="ms-auto flex shrink-0 items-center gap-1.5 text-muted-foreground hover:text-foreground"

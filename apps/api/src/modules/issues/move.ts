@@ -19,6 +19,7 @@ import {
 } from '@repo/db';
 import { and, asc, eq, inArray, notInArray, or, sql } from 'drizzle-orm';
 import { HttpError } from '#shared/lib';
+import { issueTreeIds } from './hierarchy';
 import type { ProjectRow } from '#modules/projects/service';
 import { assertWipLimit } from '#modules/columns/service';
 import { getIssue, recordParentChange, type IssueRow } from './service';
@@ -67,7 +68,7 @@ export async function moveIssue(
     .from(issue)
     .innerJoin(projectColumn, eq(projectColumn.id, issue.columnId))
     .leftJoin(issueType, eq(issueType.id, issue.typeId))
-    .where(or(eq(issue.id, issueId), eq(issue.parentId, issueId)))
+    .where(inArray(issue.id, await issueTreeIds([issueId])))
     .orderBy(sql`${issue.id} <> ${issueId}`, asc(issue.sequenceNumber));
   const movedIds = moved.map((r) => r.id);
 
@@ -117,6 +118,9 @@ export async function moveIssue(
   const fields = await mapFields(movedIds, target.id);
 
   await db.transaction(async (tx) => {
+    for (const projectId of [root.projectId, target.id].sort((a, b) => a - b)) {
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(7319, ${projectId})`);
+    }
     // Everything above was read without a lock. A concurrent move of the same issue, or
     // a subtask added since, would otherwise write over that state.
     const [locked] = await tx
@@ -125,13 +129,13 @@ export async function moveIssue(
       .where(eq(issue.id, issueId))
       .for('update');
     const current = await tx
-      .select({ id: issue.id })
+      .select({ id: issue.id, parentId: issue.parentId })
       .from(issue)
-      .where(or(eq(issue.id, issueId), eq(issue.parentId, issueId)));
+      .where(inArray(issue.id, await issueTreeIds([issueId], tx)));
     if (
       locked?.projectId !== root.projectId ||
       current.length !== movedIds.length ||
-      current.some((r) => !movedIds.includes(r.id))
+      current.some((r) => moved.find((previous) => previous.id === r.id)?.parentId !== r.parentId)
     )
       throw new HttpError(409, 'The issue changed while it was being moved; try again');
 

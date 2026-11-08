@@ -8,13 +8,6 @@ import type { ActivityActor } from './activity';
 // The subtask automations a column change triggers, both off unless the project
 // turns them on (modules/projects/service.ts). A closed issue is one sitting in a
 // column whose stateType is 'completed' or 'canceled'.
-//
-// The hierarchy is one level deep, so an issue is either a subtask or a parent and
-// only one of the two rules applies to it. Each rule writes through updateIssue, so
-// the moved issues get their own activity entries and webhooks — and re-enter this
-// function. That does not loop: a rule skips an issue already in the target column,
-// which is where the nested pass finds every issue it would move.
-
 const CLOSED_STATE_TYPES = ['completed', 'canceled'];
 
 export async function applySubtaskAutomation(
@@ -25,11 +18,9 @@ export async function applySubtaskAutomation(
   if (!settings.completeParent && !settings.closeSubtasks) return;
   if (!(await isClosedColumn(after.columnId))) return;
 
-  if (after.parentId !== null) {
-    if (settings.completeParent) await completeParent(after.parentId, after, actorUserId);
-    return;
-  }
   if (settings.closeSubtasks) await closeSubtasks(after, actorUserId);
+  if (after.parentId !== null && settings.completeParent)
+    await completeParent(after.parentId, after, actorUserId);
 }
 
 // Moves the issue's parent into the column the issue was just closed in, once every
@@ -55,7 +46,10 @@ async function completeParent(
 }
 
 // Moves the issue's still-open subtasks into the column it was just closed in.
-async function closeSubtasks(parent: IssueRow, actorUserId?: ActivityActor): Promise<void> {
+async function closeSubtasks(
+  parent: Pick<IssueRow, 'id' | 'columnId'>,
+  actorUserId?: ActivityActor,
+): Promise<void> {
   const subtasks = (await listSubtasks(parent.id)).filter((s) => !s.archived);
   const closed = await closedColumnIds(subtasks.map((s) => s.columnId));
   for (const subtask of subtasks)
@@ -63,6 +57,7 @@ async function closeSubtasks(parent: IssueRow, actorUserId?: ActivityActor): Pro
       await updateIssue(subtask.id, { columnId: parent.columnId }, actorUserId, {
         skipIfColumnFull: true,
       });
+    else await closeSubtasks(subtask, actorUserId);
 }
 
 async function isClosedColumn(columnId: number): Promise<boolean> {

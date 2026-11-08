@@ -79,9 +79,7 @@ export default function SubtaskDisposalChoice({
           projectKey={projectKey}
           title={t('reassignTitle')}
           prompt={t('searchParent')}
-          // A subtask cannot be the parent of another, and neither can an issue
-          // that is being removed here.
-          exclude={(hit) => hit.parentId !== null || removedIssueIds.includes(hit.id)}
+          exclude={(hit) => removedIssueIds.includes(hit.id)}
           onPick={(hit) => {
             setNewParent(hit.identifier);
             onChange({ subtasks: 'reassign', newParentId: hit.id });

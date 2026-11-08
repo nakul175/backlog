@@ -1,3 +1,13 @@
+# Backlog by aplyd
+
+[Production](https://backlog.aplyd.org) · [Staging](https://staging.backlog.aplyd.org)
+
+Each environment sets `APP_URL` to its own public origin and `API_URL` to its public API base. Use a separate staging database, storage, cookie scope and Accounts client. Verify TLS, direct issue links, Accounts sign-in and logout, email links, REST, MCP, and Git webhooks before changing the portal link.
+
+Existing passkeys are tied to the old hostname. Keep the legacy sign-in route available through passkey transition. Preserve existing issue paths and query strings when redirecting old browser links, and migrate registered API and webhook clients separately.
+
+This deployment is based on the AGPL-licensed It's a Plan project. Upstream documentation follows.
+
 <div align="center">
 
 <img src="assets/banner.png" alt="It's a Plan — open-source project management and issue tracking where people and AI agents ship together" width="100%" />

@@ -43,12 +43,20 @@ export function setLimitsProvider(next: (workspaceId: number) => Promise<Limits>
   provider = next;
 }
 
-export function getLimits(workspaceId: number): Promise<Limits> {
-  return provider(workspaceId);
+export async function getLimits(workspaceId: number): Promise<Limits> {
+  const limits = await provider(workspaceId);
+  if (process.env.BACKLOG_LIMITED_FEATURES !== 'true') return limits;
+  const blockedFeatures = new Set<ProjectFeature>([
+    ...limits.blockedFeatures,
+    'initiatives',
+    'cycles',
+    'notes',
+  ]);
+  return { ...limits, blockedFeatures: [...blockedFeatures] };
 }
 
 export async function getTeamLimits(teamId: number, executor: DbExecutor = db): Promise<Limits> {
-  return provider(await teamWorkspaceId(teamId, executor));
+  return getLimits(await teamWorkspaceId(teamId, executor));
 }
 
 // How many workspaces one person may own. A self-hosted instance gives each person one;

@@ -1409,9 +1409,8 @@ export const issue = pgTable(
     columnId: integer('column_id')
       .notNull()
       .references(() => projectColumn.id),
-    // The issue this one is a subtask of (same project). One level deep: an issue
-    // with a parent cannot itself be a parent, which the API enforces. Deleting or
-    // archiving a parent asks what to do with its subtasks, so the ON DELETE here
+    // The immediate parent in the same project. The API rejects cycles. Deleting or
+    // archiving a parent asks what to do with its descendants, so the ON DELETE here
     // only covers the paths that bypass that choice (a deleted project).
     parentId: integer('parent_id').references((): AnyPgColumn => issue.id, {
       onDelete: 'set null',

@@ -73,7 +73,10 @@ export function useShellProject(projectKey: string | null, activeViewId: number 
     if (!project) return null;
     const filtered = applyFilters(project.issues, editor.effectiveFilters, project);
     const hideSubtaskRows = project.project.subtasksEnabled && !separateSubtasks;
-    return { ...project, issues: hideSubtaskRows ? withoutShownSubtasks(filtered) : filtered };
+    return {
+      ...project,
+      issues: hideSubtaskRows ? withoutShownSubtasks(filtered, project.issues) : filtered,
+    };
   }, [project, editor.effectiveFilters, separateSubtasks]);
 
   // Every custom field of the project comes with the board payload; consumers
