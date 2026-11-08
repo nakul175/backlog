@@ -4,6 +4,7 @@ import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { Globe, MoreHorizontal, Pencil, Star, Trash2 } from 'lucide-react';
 import { useTranslations } from 'next-intl';
+import { runtimeEnv } from '@/utils/runtimeEnv';
 import type { View } from '@/lib/api/endpoints/views';
 import { enableViewShare, disableViewShare } from '@/lib/api/endpoints/share';
 import { qk } from '@/services/queryKeys';
@@ -100,7 +101,7 @@ export default function SavedViewTab({
               />
               {view.favorite ? t('unfavorite') : t('favorite')}
             </button>
-            {canEdit && (
+            {canEdit && !runtimeEnv().limitedFeatures && (
               <button
                 type="button"
                 onClick={() => {
