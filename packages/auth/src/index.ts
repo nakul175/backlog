@@ -30,6 +30,8 @@ import { sendAuthEmail } from './mail';
 import { readAuthExtensions } from './extensions';
 import { withNativeLogout } from './native-session-adapter';
 import { nativeLogoutEnabled, nativeSessionActive } from './native-session-status';
+import { exactOidcPolicy, exactOidcUserInfo } from './exact-oidc';
+import { lookupExactOidcIdentity } from './exact-oidc-identity';
 
 // Frontend origins allowed to call the auth handler. Mandatory config: cookies, the
 // WebAuthn relying party and the cookie domain are all derived from it, so a deploy
@@ -309,12 +311,14 @@ async function refreshOidcProvider(): Promise<boolean> {
   try {
     const config = await getOidcConfig();
     if (!isOidcUsable(config)) return false;
-    const settings = JSON.stringify(config);
+    const policy = exactOidcPolicy(config);
+    const settings = JSON.stringify({ config, policy });
     if (oidc?.settings === settings) return true;
     const plugin = genericOAuth({
       config: [
         {
           providerId: OIDC_PROVIDER_ID,
+          requireIdTokenVerification: !!policy,
           clientId: config.clientId,
           clientSecret: config.clientSecret,
           discoveryUrl: config.discoveryUrl,
@@ -334,6 +338,20 @@ async function refreshOidcProvider(): Promise<boolean> {
     // genericOAuth skips a provider whose discovery failed, and logs why.
     const provider = built?.context?.socialProviders?.[0];
     if (!provider) return false;
+    if (policy) {
+      if (provider.issuer !== policy.issuer || !provider.idToken) return false;
+      provider.getUserInfo = exactOidcUserInfo(policy, {
+        original: provider.getUserInfo.bind(provider),
+        current: async () => {
+          const latest = await getOidcConfig();
+          return (
+            isOidcUsable(latest) &&
+            JSON.stringify({ config: latest, policy: exactOidcPolicy(latest) }) === settings
+          );
+        },
+        lookup: (subject) => lookupExactOidcIdentity(db, subject),
+      });
+    }
     oidc = { settings, provider };
     return true;
   } catch (error) {
