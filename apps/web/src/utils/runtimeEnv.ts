@@ -7,6 +7,7 @@ export interface RuntimeEnv {
   apiUrl: string;
   privacyUrl: string;
   termsUrl: string;
+  limitedFeatures?: boolean;
 }
 
 declare global {
@@ -28,6 +29,7 @@ export function serverRuntimeEnv(): RuntimeEnv {
     apiUrl: readOrigin('API_URL'),
     privacyUrl: readOrigin('PRIVACY_URL'),
     termsUrl: readOrigin('TERMS_URL'),
+    limitedFeatures: process.env.BACKLOG_LIMITED_FEATURES === 'true',
   };
 }
 
