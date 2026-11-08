@@ -7,7 +7,8 @@ subject links instead; it never creates an account, password, grant or binding.
 
 Default is OFF. In a reviewed isolated stack, set `APLYD_CENTRAL_OIDC_ENABLED=true`,
 `APLYD_ACCOUNTS_ISSUER` and `APLYD_ACCOUNTS_CLIENT_ID`. The existing encrypted native
-OIDC configuration must use that exact issuer's discovery URL and client ID.
+OIDC configuration must use that exact issuer's discovery URL and client ID,
+PKCE, and the `openid` plus `aplyd` scopes (the latter supplies the central session UID).
 No client secret is added to source. Plain HTTP is accepted only on loopback and
 outside production. Production issuer/configuration changes are not part of this PR.
 

@@ -1,7 +1,13 @@
 /** Central OIDC admission requires an existing exact subject link, never an email match. */
 export type ExactIdentity = { id: string; revision: string };
 export type ExactOidcPolicy = { issuer: string; clientId: string; clientSecret: string };
-type Config = { discoveryUrl: string; clientId: string; clientSecret: string };
+type Config = {
+  discoveryUrl: string;
+  clientId: string;
+  clientSecret: string;
+  scopes: string[];
+  pkce: boolean;
+};
 
 export function exactOidcPolicy(config: Config): ExactOidcPolicy | undefined {
   if (process.env.APLYD_CENTRAL_OIDC_ENABLED !== 'true') return undefined;
@@ -18,7 +24,10 @@ export function exactOidcPolicy(config: Config): ExactOidcPolicy | undefined {
       !(url.protocol === 'http:' && loopback && process.env.NODE_ENV !== 'production')) ||
     config.discoveryUrl !== issuer + '/.well-known/openid-configuration' ||
     config.clientId !== process.env.APLYD_ACCOUNTS_CLIENT_ID ||
-    config.clientSecret.length < 32
+    config.clientSecret.length < 32 ||
+    !config.pkce ||
+    !config.scopes.includes('openid') ||
+    !config.scopes.includes('aplyd')
   )
     throw new Error('Central OIDC configuration is not pinned.');
   return { issuer, clientId: config.clientId, clientSecret: config.clientSecret };

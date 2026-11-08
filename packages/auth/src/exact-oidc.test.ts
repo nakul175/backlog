@@ -182,7 +182,15 @@ describe('central OIDC exact admission', () => {
   });
   it('leaves existing generic sign-in unchanged when the new gate is off', () => {
     delete process.env.APLYD_CENTRAL_OIDC_ENABLED;
-    expect(exactOidcPolicy({ discoveryUrl: '', clientId: '', clientSecret: '' })).toBeUndefined();
+    expect(
+      exactOidcPolicy({
+        discoveryUrl: '',
+        clientId: '',
+        clientSecret: '',
+        scopes: [],
+        pkce: false,
+      }),
+    ).toBeUndefined();
   });
   it('pins discovery/client and permits HTTP only for nonproduction loopback', () => {
     process.env.APLYD_CENTRAL_OIDC_ENABLED = 'true';
@@ -190,11 +198,15 @@ describe('central OIDC exact admission', () => {
     process.env.APLYD_ACCOUNTS_CLIENT_ID = 'backlog-staging';
     process.env.NODE_ENV = 'test';
     const config = {
+      scopes: ['openid', 'aplyd'],
+      pkce: true,
       discoveryUrl: issuer + '/.well-known/openid-configuration',
       clientId: 'backlog-staging',
       clientSecret: secret,
     };
     expect(exactOidcPolicy(config)?.issuer).toBe(issuer);
+    expect(() => exactOidcPolicy({ ...config, scopes: ['openid'] })).toThrow();
+    expect(() => exactOidcPolicy({ ...config, pkce: false })).toThrow();
     expect(() => exactOidcPolicy({ ...config, clientId: 'wrong' })).toThrow();
     expect(() =>
       exactOidcPolicy({ ...config, discoveryUrl: 'https://wrong.example/discovery' }),
