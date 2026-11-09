@@ -132,11 +132,12 @@ export async function signInWithGoogle(returnTo?: string): Promise<void> {
 // Starts the round trip through the instance's own OIDC provider. Same shape as the
 // Google call above: it navigates away, and both callback URLs must be on the web
 // origin. The provider id is fixed — the instance has exactly one.
-export async function signInWithOidc(returnTo?: string): Promise<void> {
+export async function signInWithOidc(returnTo?: string, signal?: AbortSignal): Promise<void> {
   const result = await signIn.social({
     provider: 'oidc',
     callbackURL: appUrl(returnTo ?? '/'),
     errorCallbackURL: appUrl(returnTo ?? '/login'),
+    fetchOptions: { signal },
   });
   if (result.error) throw new Error(result.error.message ?? '');
 }
