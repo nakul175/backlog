@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { db, project, projectMember, teamMember, teamRole, revision } from '@repo/db';
-import { and, eq, inArray, isNotNull, or } from 'drizzle-orm';
+import { and, eq, inArray, isNotNull, or, sql } from 'drizzle-orm';
 import { toMemberContext, type MemberRole } from '#modules/members/service';
 import { workspaceGrants } from '#modules/workspaces/service';
 import { hasPermission, type PermissionResource } from '#shared/permissions';
@@ -20,6 +20,7 @@ export interface ScopeKind {
 }
 
 export const scopeKind: Record<string, ScopeKind> = {
+  workspaces: { key: (_id, userId) => `workspaces:${userId}`, resource: null },
   access: { key: (projectId) => `access:${projectId}`, resource: null },
   board: { key: (projectId) => `board:${projectId}`, resource: 'work_items' },
   documents: { key: (projectId) => `documents:${projectId}`, resource: 'documents' },
@@ -127,6 +128,17 @@ export async function readRevs(
         .update(JSON.stringify({ ...access, teamRole: team?.role ?? null }))
         .digest('hex');
     }
+  }
+  if (wanted.some((w) => w.key === `workspaces:${userId}`)) {
+    const memberships = await db.execute(sql`
+      SELECT t.workspace_id,t.id,t.name,m.role,m.source FROM team_member m
+      JOIN team t ON t.id=m.team_id WHERE m.user_id=${userId} ORDER BY t.id`);
+    const managers = await db.execute(sql`
+      SELECT w.id,w.name,w.team_creation,m.role FROM workspace_manager m
+      JOIN workspace w ON w.id=m.workspace_id WHERE m.user_id=${userId} ORDER BY w.id`);
+    out[`workspaces:${userId}`] = createHash('sha256')
+      .update(JSON.stringify({ memberships, managers }))
+      .digest('hex');
   }
   return out;
 }

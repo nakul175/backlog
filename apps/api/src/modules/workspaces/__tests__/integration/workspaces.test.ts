@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { eq } from 'drizzle-orm';
 import { setAuthSettings, setWorkspaceScim } from '@repo/auth';
-import { db, workspace } from '@repo/db';
+import { db, workspace, workspaceManager } from '@repo/db';
 import { deleteAccount } from '#shared/account-deletion';
 import { setOwnedWorkspaceLimit } from '#shared/limits';
 import { apiKeyApi, app, authedApi, createProject } from '#tests/helpers/app';
@@ -173,6 +173,50 @@ describe('workspaces', () => {
         [admin.userId, 'owner'],
         [person.userId, 'admin'],
       ]);
+    });
+
+    it('rejects a stale owner and preserves the current two manager rows', async () => {
+      const { person, admin, workspaceId } = await withAdmin();
+      await transferWorkspace(workspaceId, person.userId, admin.userId);
+      await expect(transferWorkspace(workspaceId, person.userId, admin.userId)).rejects.toThrow(
+        'Current workspace owner changed',
+      );
+      const rows = await db
+        .select()
+        .from(workspaceManager)
+        .where(eq(workspaceManager.workspaceId, workspaceId));
+      expect(rows.filter((row) => row.role === 'owner').map((row) => row.userId)).toEqual([
+        admin.userId,
+      ]);
+    });
+
+    it('concurrent transfers cannot give a successor two workspaces past the quota', async () => {
+      const { person, admin, workspaceId } = await withAdmin();
+      const another = await db
+        .select()
+        .from(workspaceManager)
+        .where(eq(workspaceManager.role, 'owner'));
+      const other = another.find((row) => row.workspaceId !== workspaceId)!;
+      await db
+        .insert(workspaceManager)
+        .values({ workspaceId: other.workspaceId, userId: admin.userId, role: 'admin' });
+      const result = await Promise.allSettled([
+        transferWorkspace(workspaceId, person.userId, admin.userId),
+        transferWorkspace(other.workspaceId, other.userId, admin.userId),
+      ]);
+      expect(result.filter((entry) => entry.status === 'fulfilled')).toHaveLength(1);
+      const rows = await db
+        .select()
+        .from(workspaceManager)
+        .where(eq(workspaceManager.userId, admin.userId));
+      expect(rows.filter((row) => row.role === 'owner')).toHaveLength(1);
+      for (const id of [workspaceId, other.workspaceId]) {
+        const owners = await db
+          .select()
+          .from(workspaceManager)
+          .where(eq(workspaceManager.workspaceId, id));
+        expect(owners.filter((row) => row.role === 'owner')).toHaveLength(1);
+      }
     });
 
     it('refuses somebody who is not its admin, or who owns a workspace already', async () => {
