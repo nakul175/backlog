@@ -960,8 +960,10 @@ export async function setTeamMemberRole(
   actor: { userId: string; role: TeamStanding },
   userId: string,
   role: TeamRole,
+  review?: (tx: Transaction) => Promise<void>,
 ): Promise<void> {
   await db.transaction(async (tx) => {
+    if (review) await review(tx);
     await tx.select({ id: team.id }).from(team).where(eq(team.id, teamId)).for('update');
     const actorRole = await actorStandingInTransaction(tx, teamId, actor.userId);
     if (!runsTeam(actorRole))
@@ -1076,8 +1078,10 @@ export async function removeTeamMember(
   teamId: number,
   actorId: string,
   userId: string,
+  review?: (tx: Transaction) => Promise<void>,
 ): Promise<void> {
   await db.transaction(async (tx) => {
+    if (review) await review(tx);
     await tx.select({ id: team.id }).from(team).where(eq(team.id, teamId)).for('update');
     if ((await actorStandingInTransaction(tx, teamId, actorId)) !== 'owner') {
       throw new HttpError(403, 'Only a team owner can remove members');

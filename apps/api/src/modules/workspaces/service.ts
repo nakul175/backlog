@@ -305,35 +305,73 @@ export async function transferWorkspace(
   workspaceId: number,
   ownerId: string,
   toUserId: string,
+  review?: (tx: DbExecutor) => Promise<void>,
 ): Promise<void> {
-  if ((await getWorkspaceRole(workspaceId, toUserId)) !== 'admin') {
-    throw new HttpError(404, 'This person is not an admin of the workspace');
-  }
-  const [target] = await db.select({ role: user.role }).from(user).where(eq(user.id, toUserId));
-  const limit = getOwnedWorkspaceLimit();
-  if (target?.role !== 'god' && limit > 0) {
-    const owned = await db.$count(
-      workspaceManager,
-      and(eq(workspaceManager.userId, toUserId), eq(workspaceManager.role, 'owner')),
-    );
-    if (owned >= limit) {
-      throw new HttpError(409, 'This person already owns as many workspaces as one person may');
-    }
-  }
-  // One owner per workspace: the current one steps down before the admin steps up.
+  if (ownerId === toUserId) throw new HttpError(409, 'Select a different workspace owner');
   await db.transaction(async (tx) => {
+    if (review) await review(tx);
+    // Serialize quota checks with personal-workspace creation and other transfers.
+    const people = await tx
+      .select({ id: user.id, role: user.role, active: user.active })
+      .from(user)
+      .where(inArray(user.id, [ownerId, toUserId]))
+      .orderBy(asc(user.id))
+      .for('update');
+    if (people.length !== 2 || people.some((person) => !person.active)) {
+      throw new HttpError(409, 'Both workspace owners must be active');
+    }
     await tx
+      .select({ id: workspace.id })
+      .from(workspace)
+      .where(eq(workspace.id, workspaceId))
+      .for('update');
+    const managers = await tx
+      .select({ userId: workspaceManager.userId, role: workspaceManager.role })
+      .from(workspaceManager)
+      .where(eq(workspaceManager.workspaceId, workspaceId))
+      .for('update');
+    const owners = managers.filter((manager) => manager.role === 'owner');
+    if (owners.length !== 1 || owners[0]!.userId !== ownerId) {
+      throw new HttpError(409, 'Current workspace owner changed');
+    }
+    if (managers.find((manager) => manager.userId === toUserId)?.role !== 'admin') {
+      throw new HttpError(404, 'This person is not an admin of the workspace');
+    }
+    const target = people.find((person) => person.id === toUserId)!;
+    const limit = getOwnedWorkspaceLimit();
+    if (target.role !== 'god' && limit > 0) {
+      const owned = await tx
+        .select({ workspaceId: workspaceManager.workspaceId })
+        .from(workspaceManager)
+        .where(and(eq(workspaceManager.userId, toUserId), eq(workspaceManager.role, 'owner')));
+      if (owned.length >= limit) {
+        throw new HttpError(409, 'This person already owns as many workspaces as one person may');
+      }
+    }
+    const previous = await tx
       .update(workspaceManager)
       .set({ role: 'admin' })
       .where(
-        and(eq(workspaceManager.workspaceId, workspaceId), eq(workspaceManager.userId, ownerId)),
-      );
-    await tx
+        and(
+          eq(workspaceManager.workspaceId, workspaceId),
+          eq(workspaceManager.userId, ownerId),
+          eq(workspaceManager.role, 'owner'),
+        ),
+      )
+      .returning();
+    const successor = await tx
       .update(workspaceManager)
       .set({ role: 'owner' })
       .where(
-        and(eq(workspaceManager.workspaceId, workspaceId), eq(workspaceManager.userId, toUserId)),
-      );
+        and(
+          eq(workspaceManager.workspaceId, workspaceId),
+          eq(workspaceManager.userId, toUserId),
+          eq(workspaceManager.role, 'admin'),
+        ),
+      )
+      .returning();
+    if (previous.length !== 1 || successor.length !== 1)
+      throw new HttpError(409, 'Workspace transfer changed');
   });
   forgetPersonalWorkspace(ownerId);
 }

@@ -16,13 +16,24 @@ import {
   type WorkspacePatch,
   updateWorkspaceScim,
 } from '@/lib/api/endpoints/workspaces';
+import { useLiveRefresh } from '@/hooks/useLiveRefresh';
+import { revScope } from '@/utils/revScopes';
 import { qk } from '@/services/queryKeys';
 
+function useWorkspaceRefresh() {
+  useLiveRefresh({
+    scope: revScope.workspaces,
+    targets: [qk.workspaces, qk.teams, qk.projects, ['workspace'], ['team']],
+  });
+}
+
 export function useWorkspacesQuery() {
+  useWorkspaceRefresh();
   return useQuery({ queryKey: qk.workspaces, queryFn: () => listWorkspaces() });
 }
 
 export function useWorkspaceQuery(workspaceId: number) {
+  useWorkspaceRefresh();
   return useQuery({
     queryKey: qk.workspace(workspaceId),
     queryFn: () => getWorkspace(workspaceId),

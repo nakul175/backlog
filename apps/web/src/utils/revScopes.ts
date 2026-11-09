@@ -2,6 +2,7 @@
 // API accepts on GET /sync/rev. The inbox is asked for by project — the server
 // answers with the session user's own, so the user id never appears here.
 export const revScope = {
+  workspaces: 'workspaces:1',
   access: (projectId: number) => `access:${projectId}`,
   board: (projectId: number) => `board:${projectId}`,
   issue: (issueId: number) => `issue:${issueId}`,

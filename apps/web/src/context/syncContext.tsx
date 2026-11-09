@@ -66,7 +66,11 @@ export function SyncProvider({ children }: { children: ReactNode }) {
       // fetched matches it. Markers stay remembered after a screen unmounts, so
       // returning to it with a stale cache refetches on the first tick.
       // Access may change between the scaffold read and this first poll.
-      if (previous === rev || (previous === undefined && !scope.startsWith('access:'))) continue;
+      if (
+        previous === rev ||
+        (previous === undefined && !scope.startsWith('access:') && !scope.startsWith('workspaces:'))
+      )
+        continue;
       for (const watcher of watchers.current) {
         if (watcher.scope !== scope) continue;
         for (const key of watcher.targets) void qc.invalidateQueries({ queryKey: key });
