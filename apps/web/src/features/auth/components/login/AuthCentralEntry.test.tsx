@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mock } from 'bun:test';
+import { createRequire } from 'node:module';
 import * as authService from '../../services/auth.service';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import { act } from 'react';
@@ -7,6 +7,10 @@ import type { Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import { JSDOM } from 'jsdom';
 import auth from '../../../../../messages/en/auth.json';
+
+const { mock } = createRequire(import.meta.url)('bun:test') as {
+  mock: { module(path: string, factory: () => typeof authService): void };
+};
 
 const replacedGlobals = [
   'window',
