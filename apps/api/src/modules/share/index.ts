@@ -41,6 +41,12 @@ export const shareRoutes = new Elysia({ name: 'share', detail: { tags: ['Share']
     ),
   })
 
+  .onBeforeHandle(() => {
+    if (process.env.BACKLOG_LIMITED_FEATURES === 'true') {
+      throw new HttpError(404, 'Not found');
+    }
+  })
+
   // --- Enable / revoke (session-gated) -------------------------------------------
 
   .post(
