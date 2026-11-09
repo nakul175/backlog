@@ -226,6 +226,7 @@ services:
     depends_on:
       - api
     environment:
+      - APLYD_APEX_LOGIN_ONLY=${APLYD_APEX_LOGIN_ONLY:-false}
       # Declares this service's public domain on port 3001; see the api service.
       - SERVICE_URL_WEB_3001
       - NODE_ENV=production
