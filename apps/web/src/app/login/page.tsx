@@ -8,8 +8,8 @@ export default async function Page({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   await connection();
-  if (process.env.APLYD_APEX_LOGIN_ONLY === 'true') {
-    const params = await searchParams;
+  const params = await searchParams;
+  if (process.env.APLYD_APEX_LOGIN_ONLY === 'true' || params.central === '1') {
     return <AuthCentralEntry failed={!!params.error} />;
   }
   return <AuthLoginPage />;
