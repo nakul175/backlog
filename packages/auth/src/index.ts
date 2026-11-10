@@ -29,7 +29,9 @@ import {
 import { sendAuthEmail } from './mail';
 import { readAuthExtensions } from './extensions';
 import { withNativeLogout } from './native-session-adapter';
-import { nativeLogoutEnabled, nativeSessionActive } from './native-session-status';
+import { nativeEnforcementRequired, nativeSessionActive } from './native-session-status';
+import { exactOidcPolicy, exactOidcUserInfo } from './exact-oidc';
+import { lookupExactOidcIdentity } from './exact-oidc-identity';
 
 // Frontend origins allowed to call the auth handler. Mandatory config: cookies, the
 // WebAuthn relying party and the cookie domain are all derived from it, so a deploy
@@ -205,6 +207,7 @@ export async function verifyMcpAccessToken(token: string): Promise<string | null
   // Disconnecting the application on the account's Security page ends its tokens at once.
   if (typeof claims.client_id !== 'string') return null;
   if (!(await isClientConnected(claims.sub, claims.client_id))) return null;
+  if (claims.sub.startsWith('portal_btf_') && typeof claims.sid !== 'string') return null;
   if (typeof claims.sid === 'string') {
     const [open] = await db
       .select({ userId: schema.session.userId, createdAt: schema.session.createdAt })
@@ -212,7 +215,7 @@ export async function verifyMcpAccessToken(token: string): Promise<string | null
       .where(and(eq(schema.session.id, claims.sid), gt(schema.session.expiresAt, new Date())));
     if (!open) return null;
     if (
-      nativeLogoutEnabled() &&
+      nativeEnforcementRequired(open.userId) &&
       (open.userId !== claims.sub || !(await nativeSessionActive(open.userId, open.createdAt)))
     )
       return null;
@@ -309,12 +312,14 @@ async function refreshOidcProvider(): Promise<boolean> {
   try {
     const config = await getOidcConfig();
     if (!isOidcUsable(config)) return false;
-    const settings = JSON.stringify(config);
+    const policy = exactOidcPolicy(config);
+    const settings = JSON.stringify({ config, policy });
     if (oidc?.settings === settings) return true;
     const plugin = genericOAuth({
       config: [
         {
           providerId: OIDC_PROVIDER_ID,
+          requireIdTokenVerification: !!policy,
           clientId: config.clientId,
           clientSecret: config.clientSecret,
           discoveryUrl: config.discoveryUrl,
@@ -334,6 +339,20 @@ async function refreshOidcProvider(): Promise<boolean> {
     // genericOAuth skips a provider whose discovery failed, and logs why.
     const provider = built?.context?.socialProviders?.[0];
     if (!provider) return false;
+    if (policy) {
+      if (provider.issuer !== policy.issuer || !provider.idToken) return false;
+      provider.getUserInfo = exactOidcUserInfo(policy, {
+        original: provider.getUserInfo.bind(provider),
+        current: async () => {
+          const latest = await getOidcConfig();
+          return (
+            isOidcUsable(latest) &&
+            JSON.stringify({ config: latest, policy: exactOidcPolicy(latest) }) === settings
+          );
+        },
+        lookup: (subject) => lookupExactOidcIdentity(db, subject),
+      });
+    }
     oidc = { settings, provider };
     return true;
   } catch (error) {
@@ -1016,7 +1035,13 @@ export async function getSessionFromHeaders(
   headers: Headers,
 ): Promise<Awaited<ReturnType<typeof auth.api.getSession>>> {
   try {
-    return await auth.api.getSession({ headers });
+    const result = await auth.api.getSession({ headers });
+    if (
+      result?.user.id.startsWith('portal_btf_') &&
+      !(await nativeSessionActive(result.user.id, new Date(result.session.createdAt)))
+    )
+      return null;
+    return result;
   } catch (error) {
     if (error instanceof APIError && (error.statusCode === 401 || error.statusCode === 403)) {
       return null;

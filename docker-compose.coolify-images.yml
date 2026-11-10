@@ -119,6 +119,8 @@ services:
       minio:
         condition: service_started
     environment:
+      - APLYD_PORTAL_WORKSPACE_ENABLED=${APLYD_PORTAL_WORKSPACE_ENABLED:-0}
+      - APLYD_PORTAL_WORKSPACE_CONFIG=${APLYD_PORTAL_WORKSPACE_CONFIG:-}
       # Listed without a value, this asks Coolify for the public domain of this
       # service on port 3000. The port belongs to the declaration only — the value read
       # back below is SERVICE_URL_API, which Coolify derives from it without the port.
@@ -226,6 +228,7 @@ services:
     depends_on:
       - api
     environment:
+      - APLYD_APEX_LOGIN_ONLY=${APLYD_APEX_LOGIN_ONLY:-false}
       # Declares this service's public domain on port 3001; see the api service.
       - SERVICE_URL_WEB_3001
       - NODE_ENV=production

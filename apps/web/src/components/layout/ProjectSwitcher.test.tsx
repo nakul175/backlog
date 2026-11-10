@@ -7,6 +7,7 @@ import { NextIntlClientProvider } from 'next-intl';
 import { JSDOM } from 'jsdom';
 import type { Project } from '@/lib/api/endpoints/projects';
 import type { Team } from '@/lib/api/endpoints/teams';
+import { SyncProvider } from '@/context/syncContext';
 import { qk } from '@/services/queryKeys';
 import nav from '../../../messages/en/nav.json';
 import common from '../../../messages/en/common.json';
@@ -158,20 +159,22 @@ async function render(mobile = true, items = projects) {
   await act(async () =>
     root.render(
       <QueryClientProvider client={client}>
-        <NextIntlClientProvider locale="en" messages={{ nav, common, teams }} timeZone="UTC">
-          <RelativeTimeProvider>
-            <SidebarProvider>
-              <SidebarTrigger />
-              <Sidebar>
-                <ProjectSwitcher
-                  projects={items}
-                  currentProjectKey="eng.P01"
-                  onSelectProject={(key) => selections.push(key)}
-                />
-              </Sidebar>
-            </SidebarProvider>
-          </RelativeTimeProvider>
-        </NextIntlClientProvider>
+        <SyncProvider>
+          <NextIntlClientProvider locale="en" messages={{ nav, common, teams }} timeZone="UTC">
+            <RelativeTimeProvider>
+              <SidebarProvider>
+                <SidebarTrigger />
+                <Sidebar>
+                  <ProjectSwitcher
+                    projects={items}
+                    currentProjectKey="eng.P01"
+                    onSelectProject={(key) => selections.push(key)}
+                  />
+                </Sidebar>
+              </SidebarProvider>
+            </RelativeTimeProvider>
+          </NextIntlClientProvider>
+        </SyncProvider>
       </QueryClientProvider>,
     ),
   );
@@ -240,7 +243,13 @@ beforeEach(async () => {
       configurable: true,
       value: async (input: string | URL) => {
         const url = new URL(String(input));
-        return url.pathname === '/projects/search' ? searchProjects(url) : Response.json(null);
+        if (url.pathname === '/projects/search') return searchProjects(url);
+        if (url.pathname === '/sync/rev')
+          return Response.json({ revs: { 'workspaces:1': 'fixture' } });
+        if (url.pathname === '/workspaces')
+          return Response.json(client.getQueryData(qk.workspaces) ?? []);
+        if (url.pathname === '/teams') return Response.json(client.getQueryData(qk.teams) ?? []);
+        return Response.json(null);
       },
     },
     IS_REACT_ACT_ENVIRONMENT: { configurable: true, value: true },

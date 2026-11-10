@@ -1,0 +1,41 @@
+name: Transition release artifacts
+on:
+  pull_request:
+    paths: ['.github/workflows/transition-artifacts.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      max-parallel: 1
+      matrix:
+        app: [api, web]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: docker/setup-buildx-action@v3
+      - name: Build isolated Linux artifact
+        env:
+          APP: ${{ matrix.app }}
+          SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          docker buildx build --platform linux/amd64 --target release \
+            --label "org.opencontainers.image.revision=$SOURCE_SHA" \
+            --output "type=docker,dest=backlog-$APP.tar" \
+            -f "apps/$APP/Dockerfile" -t "backlog-$APP:$SOURCE_SHA" .
+          gzip -1 "backlog-$APP.tar"
+          sha256sum "backlog-$APP.tar.gz" > "backlog-$APP.sha256"
+          printf '%s\n' "$SOURCE_SHA" > SOURCE-SHA.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: backlog-${{ matrix.app }}-linux
+          path: |
+            backlog-${{ matrix.app }}.tar.gz
+            backlog-${{ matrix.app }}.sha256
+            SOURCE-SHA.txt
+          retention-days: 7
+          compression-level: 0

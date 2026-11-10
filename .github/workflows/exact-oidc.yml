@@ -1,0 +1,31 @@
+name: Exact central OIDC identity
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  identity:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_HOST_AUTH_METHOD: trust
+          POSTGRES_DB: btf_exact_oidc_test_a11ce
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready --health-interval 5s
+          --health-timeout 3s --health-retries 10
+    env:
+      APLYD_EXACT_OIDC_TEST: 'true'
+      DATABASE_URL: postgresql://postgres@127.0.0.1:5432/btf_exact_oidc_test_a11ce
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.3
+      - run: bun install --frozen-lockfile
+      - run: bun test scripts/exact-oidc.test.ts scripts/native-session-status.test.ts scripts/native-provisioned-session-adapter.test.ts packages/db/tests/exact-oidc-postgres.test.ts

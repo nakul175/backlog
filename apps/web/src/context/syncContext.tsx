@@ -65,7 +65,12 @@ export function SyncProvider({ children }: { children: ReactNode }) {
       // The first value of a scope is the baseline: whatever the screen just
       // fetched matches it. Markers stay remembered after a screen unmounts, so
       // returning to it with a stale cache refetches on the first tick.
-      if (previous === undefined || previous === rev) continue;
+      // Access may change between the scaffold read and this first poll.
+      if (
+        previous === rev ||
+        (previous === undefined && !scope.startsWith('access:') && !scope.startsWith('workspaces:'))
+      )
+        continue;
       for (const watcher of watchers.current) {
         if (watcher.scope !== scope) continue;
         for (const key of watcher.targets) void qc.invalidateQueries({ queryKey: key });
