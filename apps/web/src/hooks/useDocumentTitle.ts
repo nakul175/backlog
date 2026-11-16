@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect } from 'react';
-import { APP_NAME } from '@/utils/app';
+import { APP_BRAND } from '@/utils/app';
 
 // The layers a screen's title can come from. A higher one wins while it is mounted:
 // the shell names the section, the page inside it names its entity, and a side panel
@@ -18,7 +18,7 @@ let observedHead: HTMLHeadElement | null = null;
 function apply() {
   let top: Entry | null = null;
   for (const entry of entries) if (!top || entry.rank >= top.rank) top = entry;
-  const title = top?.title ?? APP_NAME;
+  const title = top?.title ?? APP_BRAND;
   if (window.document.title !== title) window.document.title = title;
   // Next streams the metadata, and React can insert its <title> into the head after
   // a page has set its own; the browser shows the first one, so the title is set again.
