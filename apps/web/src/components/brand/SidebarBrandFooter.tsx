@@ -6,7 +6,7 @@ import ReleaseHistory from '@/features/whats-new/components/ReleaseHistory';
 import { useSession } from '@/lib/auth-client';
 import { cn } from '@/lib/utils';
 import { useAppVersionQuery, useUpdateStatusQuery } from '@/services/updates.service';
-import { APP_NAME } from '@/utils/app';
+import { APP_BRAND } from '@/utils/app';
 
 // The product mark at the bottom of both sidebars, with the running version under
 // it. Collapses to the mark alone when the sidebar is in icon mode.
@@ -39,7 +39,7 @@ export default function SidebarBrandFooter() {
       <ItsAPlanMark className="size-9 shrink-0 text-sidebar-foreground" />
       <div className="grid text-left leading-none group-data-[collapsible=icon]:hidden">
         <span className="text-base font-semibold tracking-tight text-sidebar-foreground">
-          {APP_NAME}
+          {APP_BRAND}
         </span>
         {newerVersion ? (
           <span className="mt-1 flex items-center gap-1.5 text-[10px] font-medium tracking-wider text-primary uppercase">

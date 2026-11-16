@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, it } from 'node:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { JSDOM } from 'jsdom';
-import { APP_NAME } from '@/utils/app';
+import { APP_BRAND } from '@/utils/app';
 import { titlePath, useDocumentTitle } from './useDocumentTitle';
 
 const replacedGlobals = ['window', 'document', 'IS_REACT_ACT_ENVIRONMENT'];
@@ -74,13 +74,13 @@ describe('useDocumentTitle', () => {
     assert.equal(document.title, 'Acme › Inbox');
 
     await render(null);
-    assert.equal(document.title, APP_NAME);
+    assert.equal(document.title, APP_BRAND);
   });
 
   it('keeps its title when a <title> is inserted into the head later', async () => {
     await render({ section: 'Account › Profile' });
     const late = document.createElement('title');
-    late.textContent = APP_NAME;
+    late.textContent = APP_BRAND;
     await act(async () => {
       document.head.insertBefore(late, document.head.firstChild);
       await new Promise((resolve) => setTimeout(resolve, 0));
